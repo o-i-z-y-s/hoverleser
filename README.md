@@ -14,10 +14,10 @@ Hover over any German word in Firefox to see its translation, gender, IPA pronun
 ## Import the dictionary
 
 1. Click the Hoverleser icon in the toolbar
-2. Click **Open in tab** (top-right of the popup)
+2. Click the **Expand** button to open in new tab (top-right of the popup)
 3. Download `de-vx.x.x.jsonl.gz` from the [latest release](https://github.com/o-i-z-y-s/hoverleser/releases/latest)
 4. Drag that file onto the import area
-5. Wait for the status dot to turn green
+5. Wait for install and the status dot to turn green
 
 Hover over any German word and the popup will appear.
 
