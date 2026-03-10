@@ -8,7 +8,7 @@
 
 name: Build & Release
 
-on:
+"on":
   push:
     branches: [main]
 
