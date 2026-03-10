@@ -1,0 +1,69 @@
+# Hoverleser — Dictionary Build Workflow
+#
+# Rebuilds the pre-processed German dictionary and attaches it to the
+# latest GitHub Release as a downloadable artifact.
+#
+# Triggers:
+#   1. Push to main that modifies processing logic (build-dict.js or background.js)
+#   2. Monthly schedule — picks up new kaikki.org data
+#   3. Manual dispatch — run any time from the Actions tab
+
+name: Build Dictionary
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/build-dict.js'
+      - 'background.js'
+  schedule:
+    - cron: '0 3 1 * *'
+  workflow_dispatch:
+
+jobs:
+  build-dictionary:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Read extension version
+        id: version
+        run: |
+          VERSION=$(node -p "require('./manifest.json').version")
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Build dictionary (German)
+        run: |
+          mkdir -p dist
+
+          # Compressed build — let script use its default .gz extension
+          node scripts/build-dict.js \
+            --code de \
+            --out  dist/de-v${{ steps.version.outputs.VERSION }}.jsonl.gz \
+            --compress
+
+          # Uncompressed build
+          node scripts/build-dict.js \
+            --code de \
+            --out  dist/de-v${{ steps.version.outputs.VERSION }}.jsonl
+
+          echo "--- Output sizes ---"
+          ls -lh dist/de-v*.jsonl dist/de-v*.jsonl.gz
+
+      - name: Upload dictionary to latest release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.VERSION }}
+          files: |
+            dist/de-v${{ steps.version.outputs.VERSION }}.jsonl.gz
+            dist/de-v${{ steps.version.outputs.VERSION }}.jsonl
+          fail_on_unmatched_files: false

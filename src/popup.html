@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width">
+  <title>hoverleser</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      width: 290px;
+      background: #1c1c1c;
+      color: #dcdcdc;
+      font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+      font-size: 13px;
+    }
+    @media (max-width: 499px) { .card { width: 100%; } }
+
+    .header { display: flex; align-items: center; justify-content: space-between;
+              background: #171717; padding: 12px 16px; border-bottom: 1px solid #2e2e2e; }
+    .header-text { display: flex; flex-direction: column; }
+    .brand-name { font-size: 17px; font-weight: 800; color: #e8e8e8; letter-spacing: -0.5px; }
+    .brand-sub  { font-size: 10px; color: #888; margin-top: 2px; }
+
+    .btn-open-tab {
+      flex-shrink: 0;
+      background: transparent; border: 1px solid #333; border-radius: 6px;
+      color: #999; font-size: 26px; line-height: 1;
+      width: 36px; height: 36px;
+      display: flex; align-items: center; justify-content: center;
+      padding: 0; cursor: pointer; transition: color .15s, border-color .15s;
+    }
+    .btn-open-tab:hover { color: #ddd; border-color: #555; }
+    @media (min-width: 500px) { .btn-open-tab { display: none; } }
+
+    .row { display: flex; align-items: center; justify-content: space-between;
+           padding: 9px 16px; border-bottom: 1px solid #262626; }
+    .row-label { color: #999; font-size: 12px; }
+
+    .switch { position: relative; width: 36px; height: 20px; }
+    .switch input { display: none; }
+    .slider { position: absolute; inset: 0; background: #2e2e2e; border-radius: 20px; cursor: pointer; transition: background .2s; }
+    .slider::before { content: ''; position: absolute; width: 14px; height: 14px; left: 3px; top: 3px;
+                      background: #555; border-radius: 50%; transition: transform .2s, background .2s; }
+    input:checked + .slider { background: #2d5a3d; }
+    input:checked + .slider::before { transform: translateX(16px); background: #7ed8a4; }
+
+    .status-panel { padding: 10px 16px; border-bottom: 1px solid #262626; }
+    .status-row   { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+    #status-text  { color: #999; }
+    #db-meta      { font-size: 10px; color: #777; margin-top: 3px; padding-left: 16px; }
+
+    .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .dot-ready   { background: #4ade80; }
+    .dot-empty   { background: #f87171; }
+    .dot-loading { background: #facc15; animation: pulse 1s infinite; }
+    @keyframes pulse { 50% { opacity: .4; } }
+
+    .progress-wrap { margin-top: 6px; background: #2a2a2a; border-radius: 4px; overflow: hidden; height: 4px; }
+    .progress-bar  { height: 100%; background: #5a8a6a; transition: width .3s; }
+
+    .onboarding { display: none; margin: 6px 16px 0; padding: 7px 12px;
+                  background: #202020; border: 1px solid #383838; border-radius: 7px;
+                  font-size: 12px; color: #bbb; line-height: 1.5; }
+    .onboarding.visible { display: block; }
+    .onboarding strong { color: #eee; }
+
+    .import-panel { padding: 10px 16px 14px; }
+
+    .btn { display: inline-flex; align-items: center; justify-content: center;
+           gap: 5px; width: 100%; padding: 7px 11px; border-radius: 6px; border: none;
+           font-size: 12px; font-weight: 600; cursor: pointer; transition: background .15s; }
+    .btn + .btn   { margin-top: 6px; }
+    .btn-primary  { background: #2a3f2e; color: #8ed8a4; border: 1px solid #3a5a44; }
+    .btn-primary:hover:not(:disabled) { background: #334d38; color: #a8e8bc; }
+    .btn-ghost    { background: transparent; color: #888; border: 1px solid #333; font-weight: 400; }
+    .btn-ghost:hover:not(:disabled) { color: #f87171; border-color: #5a2a2a; }
+    .btn:disabled { opacity: .4; cursor: not-allowed; }
+
+    #file-input { display: none; }
+    .drop-zone { display: flex; flex-direction: column; align-items: center; justify-content: center;
+                 gap: 5px; border: 1px dashed #383838; border-radius: 8px;
+                 padding: 18px 12px; margin: 8px 0; text-align: center; font-size: 12px; color: #666;
+                 cursor: pointer; user-select: none; transition: background .15s, border-color .15s, color .15s; min-height: 72px; color: #777; }
+    .drop-zone:hover { background: #202020; border-color: #555; color: #aaa; }
+    .drop-zone.drag-over { background: #232b25; border-color: #5a8a6a; color: #8ed8a4; }
+    .drop-zone .dz-icon      { font-size: 20px; line-height: 1; }
+    .drop-zone .dz-primary   { color: #bbb; font-weight: 600; }
+    .drop-zone .dz-secondary { font-size: 10px; color: #777; margin-top: 2px; }
+
+    .msg { margin-top: 7px; font-size: 11px; text-align: center; min-height: 16px; }
+    .msg-ok  { color: #7ed8a4; }
+    .msg-err { color: #f87171; }
+
+    .footer { padding: 7px 16px; border-top: 1px solid #262626; font-size: 10px; color: #777; text-align: center; }
+    .footer a { color: #777; text-decoration: underline; }
+    .footer a:hover { color: #999; }
+
+    /* In narrow popup mode, hide anything that needs a real filesystem interaction */
+    @media (max-width: 499px) {
+      .onboarding  { display: none !important; }
+      .drop-zone   { display: none !important; }
+      #file-input  { display: none !important; }
+      .popup-only  { display: block !important; }
+      .tab-only    { display: none !important; }
+    }
+    @media (min-width: 500px) {
+      .popup-only  { display: none !important; }
+      .tab-only    { display: flex !important; }
+    }
+
+    .row-label-sub { font-size: 10px; color: #777; margin-top: 1px; }
+
+    /* Segmented control for max senses */
+    .seg { display: flex; gap: 3px; }
+    .seg button {
+      flex: 1; padding: 3px 0; font-size: 11px; font-weight: 600;
+      background: #252525; border: 1px solid #333; color: #888;
+      border-radius: 4px; cursor: pointer; transition: all .15s;
+    }
+    .seg button.active { background: #2d5a3d; border-color: #3a5a44; color: #7ed8a4; }
+    .seg button:hover:not(.active) { color: #bbb; border-color: #444; }
+
+    /* Import-only note shown in popup */
+    .popup-import-note {
+      font-size: 11px; color: #888; text-align: center;
+      padding: 8px 16px 4px; line-height: 1.4;
+    }
+    .popup-import-note a { color: #5a8a6a; text-decoration: underline; cursor: pointer; }
+
+    /* Tab overrides — must be LAST so they win over base styles */
+    @media (min-width: 500px) {
+      body {
+        width: 100%; min-height: 100vh;
+        display: flex; align-items: flex-start; justify-content: center;
+        padding: 48px 16px 64px; background: #141414;
+        font-size: 17px;
+      }
+      .card { width: 580px; background: #1c1c1c; border-radius: 12px;
+              border: 1px solid #333; overflow: hidden; box-shadow: 0 12px 48px #0009; }
+      .brand-name { font-size: 22px; }
+      .brand-sub  { font-size: 14px; }
+      .row-label  { font-size: 16px; }
+      .row-label-sub { font-size: 14px; }
+      .status-row { font-size: 16px; }
+      #db-meta    { font-size: 14px; }
+      .onboarding { font-size: 16px; }
+      .btn        { font-size: 16px; padding: 9px 14px; }
+      .drop-zone  { font-size: 16px; }
+      .drop-zone .dz-secondary { font-size: 14px; }
+      .msg        { font-size: 15px; }
+      .footer     { font-size: 14px; }
+      .seg button { font-size: 15px; padding: 4px 0; }
+      .popup-import-note { font-size: 15px; }
+      .row        { padding: 11px 20px; }
+      .status-panel { padding: 12px 20px; }
+      .import-panel { padding: 12px 20px 16px; }
+      .onboarding { margin: 8px 20px 0; padding: 10px 14px; }
+      .footer     { padding: 10px 20px; }
+    }
+  </style>
+</head>
+<body>
+<div class="card">
+
+  <div class="header">
+    <div class="header-text">
+      <div class="brand-name">hoverleser</div>
+      <div class="brand-sub">German hover dictionary</div>
+    </div>
+    <button class="btn-open-tab" id="btn-open-tab" title="Open in tab"><span style="display:block; transform:translateY(-3px)">⤢</span></button>
+  </div>
+
+  <div class="row">
+    <span class="row-label">Enabled</span>
+    <label class="switch">
+      <input type="checkbox" id="toggle-enabled" checked>
+      <span class="slider"></span>
+    </label>
+  </div>
+
+  <div class="row">
+    <span class="row-label">Show IPA pronunciation</span>
+    <label class="switch">
+      <input type="checkbox" id="toggle-ipa" checked>
+      <span class="slider"></span>
+    </label>
+  </div>
+
+  <div class="row">
+    <span class="row-label">Show grammatical tags</span>
+    <label class="switch">
+      <input type="checkbox" id="toggle-tags" checked>
+      <span class="slider"></span>
+    </label>
+  </div>
+
+  <div class="row">
+    <span class="row-label">Show gender badge</span>
+    <label class="switch">
+      <input type="checkbox" id="toggle-gender" checked>
+      <span class="slider"></span>
+    </label>
+  </div>
+
+  <div class="row" style="align-items:flex-start; padding-top:10px; padding-bottom:10px;">
+    <div>
+      <div class="row-label">Max definitions</div>
+      <div class="row-label-sub">per entry in popup</div>
+    </div>
+    <div class="seg" id="seg-senses">
+      <button data-val="1">1</button>
+      <button data-val="2">2</button>
+      <button data-val="3" class="active">3</button>
+      <button data-val="4">4</button>
+    </div>
+  </div>
+
+  <div class="status-panel">
+    <div class="status-row">
+      <span class="dot dot-empty" id="status-dot"></span>
+      <span id="status-text">Checking…</span>
+    </div>
+    <div id="db-meta"></div>
+    <div class="progress-wrap" id="progress-wrap" style="display:none">
+      <div class="progress-bar" id="progress-bar" style="width:0%"></div>
+    </div>
+  </div>
+
+  <div class="onboarding" id="onboarding">
+    <strong>① GitHub Releases</strong> — pre-built, ~20 MB. Download <code>de-v*.jsonl.gz</code>
+    from the <a href="https://github.com/o-i-z-y-s/hoverleser/releases/latest" target="_blank" style="color:#5a8a6a">Releases page</a>, then drag it below.<br><br>
+    <strong>② Build your own</strong> — run <code>build-dict.js</code> and drag the output below.<br><br>
+    <strong>③ kaikki.org</strong> — always current but ~930 MB, processed in-browser. Use the button below.
+  </div>
+
+  <div class="import-panel">
+    <button class="btn btn-primary" id="btn-import">⬇ Download &amp; Import German</button>
+
+    <!-- Drop zone: shown in full tab only, hidden in narrow popup -->
+    <div class="drop-zone tab-only" id="drop-zone" role="button" tabindex="0"
+         aria-label="Click to choose a .jsonl file, or drag one here">
+      <span class="dz-icon">📂</span>
+      <span class="dz-primary">Click to choose file</span>
+      <span class="dz-secondary"><code>.jsonl.gz</code> from Releases (~20 MB) · or <code>.jsonl</code> from build-dict.js (~95 MB)</span>
+    </div>
+    <input type="file" id="file-input" accept=".jsonl,.jsonl.gz">
+
+    <!-- Compact note shown in narrow popup instead of drop zone -->
+    <p class="popup-import-note popup-only">
+      Pre-built files (~20 MB) on <a href="https://github.com/o-i-z-y-s/hoverleser/releases/latest" target="_blank">GitHub Releases</a>.<br>Download, then <a id="popup-open-tab-link">open in tab</a> to import.
+    </p>
+
+    <button class="btn btn-ghost" id="btn-clear">Remove dictionary</button>
+    <div class="msg" id="import-msg"></div>
+  </div>
+
+  <div class="footer">
+    Data: <a href="https://kaikki.org" target="_blank">Wiktionary · kaikki.org</a> · CC BY-SA
+  </div>
+
+</div>
+<script src="popup.js"></script>
+</body>
+</html>
