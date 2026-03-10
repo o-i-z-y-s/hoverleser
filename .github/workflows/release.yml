@@ -16,45 +16,38 @@ jobs:
   release:
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # needed to create GitHub Releases
+      contents: write
 
     steps:
-      # ── 1. Checkout ──────────────────────────────────────────────────────
       - name: Checkout source
         uses: actions/checkout@v4
 
-      # ── 2. Set up Node (web-ext requires Node 18+) ───────────────────────
       - name: Set up Node 20
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      # ── 3. Install web-ext ───────────────────────────────────────────────
       - name: Install web-ext
         run: npm install -g web-ext
 
-      # ── 4. Read version from manifest ────────────────────────────────────
       - name: Read version
         id: version
         run: |
-          VERSION=$(node -p "require('./manifest.json').version")
+          VERSION=$(node -p "require('./src/manifest.json').version")
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
           echo "TAG=v$VERSION" >> $GITHUB_OUTPUT
 
-      # ── 5. Build unsigned XPI (for reference) ────────────────────────────
       - name: Build unsigned XPI
+        working-directory: src
         run: bash package.sh build
 
-      # ── 6. Sign via AMO (unlisted) ───────────────────────────────────────
-      #   Produces a signed .xpi that installs on regular Firefox.
-      #   If AMO secrets are not yet set, this step fails gracefully and
-      #   only the unsigned XPI is uploaded.
       - name: Sign via AMO
         id: sign
         continue-on-error: true
         env:
           AMO_API_KEY:    ${{ secrets.AMO_API_KEY }}
           AMO_API_SECRET: ${{ secrets.AMO_API_SECRET }}
+        working-directory: src
         run: |
           web-ext sign \
             --source-dir . \
@@ -62,13 +55,11 @@ jobs:
             --api-key    "$AMO_API_KEY" \
             --api-secret "$AMO_API_SECRET" \
             --channel    unlisted
-          # web-ext names the output differently — normalise it
           SIGNED=$(ls dist/*.xpi | grep -v unsigned | head -1)
           if [ -n "$SIGNED" ]; then
             cp "$SIGNED" "dist/hoverleser-${{ steps.version.outputs.VERSION }}-signed.xpi"
           fi
 
-      # ── 7. Publish GitHub Release ─────────────────────────────────────────
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -80,18 +71,11 @@ jobs:
             Hover over any German word in Firefox to see its translation, gender, IPA pronunciation and grammatical forms. Fully offline after one-time dictionary import.
 
             ### Install
-
-            **Regular Firefox** — download the `-signed.xpi` file (if signing succeeded) and drag it onto `about:addons`.
-
-            **Firefox Developer Edition / Nightly** — download the unsigned `.xpi`, go to `about:addons` → gear icon → *Install Add-on From File*, or set `xpinstall.signatures.required = false` in `about:config`.
+            Download the signed `.xpi` and drag it onto any Firefox window.
 
             ### Dictionary
-            Import the German dictionary from the extension popup after installing. The download is ~930 MB from kaikki.org (Wiktionary data, CC BY-SA) and processes entirely in your browser — nothing is sent to any server.
-
-            ### Changelog
-            See commit history for changes in this release.
-          files: |
-            dist/hoverleser-*.xpi
+            Download `de-v*.jsonl.gz`, open the extension in a full tab, drag the file onto the import area and wait for the green dot.
+          files: src/dist/hoverleser-*.xpi
           draft: false
           prerelease: false
           make_latest: true
