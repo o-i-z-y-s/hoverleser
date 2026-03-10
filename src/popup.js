@@ -76,10 +76,10 @@ async function refreshDbStatus() {
       dbMeta.textContent       = 'Connecting to kaikki.org';
     } else if (downloading) {
       statusText.innerHTML     = `Downloading & importing… <em>${importing.done.toLocaleString()} entries</em>`;
-      dbMeta.textContent       = importing.total > 0 ? `${pct}% complete` : 'Starting…';
+      dbMeta.textContent       = importing.total > 0 ? `${pct}% complete` : '';
     } else {
       statusText.innerHTML     = `Importing… <em>${importing.done.toLocaleString()} entries</em>`;
-      dbMeta.textContent       = importing.total > 0 ? `${pct}% complete` : 'Starting…';
+      dbMeta.textContent       = importing.total > 0 ? `${pct}% complete` : '';
     }
     progressWrap.style.display = 'block';
     progressBar.style.width    = `${pct}%`;
@@ -197,60 +197,87 @@ async function importFile(file) {
   setButtons({ importDisabled: true, clearDisabled: true });
 
   try {
-    let text;
+    // Stream the file — never load the whole thing into memory at once.
+    // For .gz, pipe through DecompressionStream before decoding text.
+    let stream = file.stream();
     if (file.name.endsWith('.gz')) {
-      const ab = await file.arrayBuffer();
-      const ds = new DecompressionStream('gzip');
-      const writer = ds.writable.getWriter();
-      writer.write(new Uint8Array(ab));
-      writer.close();
-      const chunks = [];
-      const reader = ds.readable.getReader();
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(value);
+      stream = stream.pipeThrough(new DecompressionStream('gzip'));
+    }
+    const reader = stream.pipeThrough(new TextDecoderStream()).getReader();
+
+    // Read first chunk to find the meta line (always line 1 in build-dict output)
+    // so we can report a meaningful total to the background.
+    let buffer = '';
+    let meta   = null;
+    let total  = 0;
+    while (!meta) {
+      const { done, value } = await reader.read();
+      if (value) buffer += value;
+      const nl = buffer.indexOf('\n');
+      if (nl !== -1) {
+        const firstLine = buffer.slice(0, nl).trim();
+        buffer = buffer.slice(nl + 1);
+        try {
+          const obj = JSON.parse(firstLine);
+          if (obj.type === 'meta') { meta = obj; total = obj.entryCount ?? 0; }
+        } catch {}
+        break; // whether we found meta or not, proceed
       }
-      text = new TextDecoder().decode(
-        new Uint8Array(chunks.reduce((a, c) => [...a, ...c], []))
-      );
-    } else {
-      text = await file.text();
-    }
-
-    const lines = text.split('\n');
-    let meta = null;
-    const entries = [];
-
-    for (const line of lines) {
-      const t = line.trim();
-      if (!t) continue;
-      let obj;
-      try { obj = JSON.parse(t); } catch { continue; }
-      if (obj.type === 'meta') { meta = obj; continue; }
-      entries.push(obj);
-    }
-
-    if (entries.length === 0) {
-      throw new Error('No entries found — is this a valid .jsonl dictionary file?');
+      if (done) break;
     }
 
     await browser.runtime.sendMessage({
-      type: 'import-file-start', langCode: LANG_CODE, lang: LANG_NAME, totalSize: entries.length,
+      type: 'import-file-start', langCode: LANG_CODE, lang: LANG_NAME, totalSize: total,
     });
 
-    // Kick off polling so the status dot + entry counter drive the UI,
-    // same as the URL import path.
+    // Start polling — status dot + entry counter now drive the UI
     pollTimer = setTimeout(refreshDbStatus, 400);
 
-    for (let i = 0; i < entries.length; i += FILE_BATCH) {
-      const batch  = entries.slice(i, i + FILE_BATCH);
-      const isLast = i + FILE_BATCH >= entries.length;
+    // Stream remaining content in batches
+    let batch    = [];
+    let gotEntry = false;
+
+    const flushBatch = async (isLast) => {
+      if (batch.length === 0 && !isLast) return;
       await browser.runtime.sendMessage({
         type: 'import-file-chunk', langCode: LANG_CODE,
         data: batch, meta: isLast ? meta : null, done: isLast,
       });
+      batch = [];
+    };
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (value) buffer += value;
+
+      // Slice out all complete lines from the buffer
+      let nl;
+      while ((nl = buffer.indexOf('\n')) !== -1) {
+        const line = buffer.slice(0, nl).trim();
+        buffer = buffer.slice(nl + 1);
+        if (!line) continue;
+        let obj;
+        try { obj = JSON.parse(line); } catch { continue; }
+        if (obj.type === 'meta') { meta = obj; continue; }
+        batch.push(obj);
+        gotEntry = true;
+        if (batch.length >= FILE_BATCH) await flushBatch(false);
+      }
+
+      if (done) break;
     }
+
+    // Handle any trailing content without a final newline
+    if (buffer.trim()) {
+      try {
+        const obj = JSON.parse(buffer.trim());
+        if (obj.type !== 'meta') { batch.push(obj); gotEntry = true; }
+      } catch {}
+    }
+
+    if (!gotEntry) throw new Error('No entries found — is this a valid .jsonl dictionary file?');
+
+    await flushBatch(true);
 
   } catch (err) {
     setMsg(err.message, 'err');
