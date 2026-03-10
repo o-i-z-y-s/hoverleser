@@ -84,11 +84,12 @@
                  cursor: pointer; user-select: none; transition: background .15s, border-color .15s, color .15s; min-height: 72px; color: #777; }
     .drop-zone:hover { background: #202020; border-color: #555; color: #aaa; }
     .drop-zone.drag-over { background: #232b25; border-color: #5a8a6a; color: #8ed8a4; }
+    .drop-zone.dz-hidden  { display: none !important; }
     .drop-zone .dz-icon      { font-size: 20px; line-height: 1; }
     .drop-zone .dz-primary   { color: #bbb; font-weight: 600; }
     .drop-zone .dz-secondary { font-size: 10px; color: #777; margin-top: 2px; }
 
-    .msg { margin-top: 7px; font-size: 11px; text-align: center; min-height: 16px; }
+    .msg { margin-top: 7px; margin-bottom: 14px; font-size: 11px; text-align: center; min-height: 16px; }
     .msg-ok  { color: #7ed8a4; }
     .msg-err { color: #f87171; }
 
@@ -251,8 +252,8 @@
       Pre-built files (~20 MB) on <a href="https://github.com/o-i-z-y-s/hoverleser/releases/latest" target="_blank">GitHub Releases</a>.<br>Download, then <a id="popup-open-tab-link">open in tab</a> to import.
     </p>
 
-    <button class="btn btn-ghost" id="btn-clear">Remove dictionary</button>
     <div class="msg" id="import-msg"></div>
+    <button class="btn btn-ghost" id="btn-clear">Remove dictionary</button>
   </div>
 
   <div class="footer">

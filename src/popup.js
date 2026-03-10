@@ -67,11 +67,20 @@ async function refreshDbStatus() {
   });
   clearTimeout(pollTimer);
 
-  if (importing && importing.status === 'running') {
+  if (importing && (importing.status === 'running' || importing.status === 'downloading')) {
+    const downloading = importing.status === 'downloading';
     const pct = importing.total > 0 ? Math.round(100 * importing.done / importing.total) : 0;
     statusDot.className        = 'dot dot-loading';
-    statusText.textContent     = `Importing… ${importing.done.toLocaleString()} entries`;
-    dbMeta.textContent         = importing.total > 0 ? `${pct}% complete` : 'Starting…';
+    if (downloading && importing.done === 0) {
+      statusText.innerHTML     = 'Downloading…';
+      dbMeta.textContent       = 'Connecting to kaikki.org';
+    } else if (downloading) {
+      statusText.innerHTML     = `Downloading & importing… <em>${importing.done.toLocaleString()} entries</em>`;
+      dbMeta.textContent       = importing.total > 0 ? `${pct}% complete` : 'Starting…';
+    } else {
+      statusText.innerHTML     = `Importing… <em>${importing.done.toLocaleString()} entries</em>`;
+      dbMeta.textContent       = importing.total > 0 ? `${pct}% complete` : 'Starting…';
+    }
     progressWrap.style.display = 'block';
     progressBar.style.width    = `${pct}%`;
     setButtons({ importDisabled: true, clearDisabled: true });
@@ -111,8 +120,9 @@ async function refreshDbStatus() {
 
 function setButtons({ importDisabled, clearDisabled }) {
   btnImport.disabled               = importDisabled;
-  dropZone.style.pointerEvents     = importDisabled ? 'none' : '';
-  dropZone.style.opacity           = importDisabled ? '0.4' : '';
+  importDisabled ? dropZone.classList.add('dz-hidden') : dropZone.classList.remove('dz-hidden');
+  dropZone.setAttribute('tabindex', importDisabled ? '-1' : '0');
+  fileInput.disabled               = importDisabled;
   btnClear.disabled                = clearDisabled;
 }
 
@@ -125,7 +135,7 @@ function setMsg(text, type) {
 async function startKaikkiImport() {
   setMsg('', '');
   setButtons({ importDisabled: true, clearDisabled: true });
-  setMsg('Connecting to kaikki.org…', 'ok');
+  
   try {
     await browser.runtime.sendMessage({
       type: 'import-url',
@@ -133,8 +143,7 @@ async function startKaikkiImport() {
       langCode: LANG_CODE,
       lang:     LANG_NAME,
     });
-    setMsg('Downloading & processing…', 'ok');
-    pollTimer = setTimeout(refreshDbStatus, 800);
+        pollTimer = setTimeout(refreshDbStatus, 800);
   } catch (err) {
     setMsg(err.message, 'err');
     setButtons({ importDisabled: false, clearDisabled: true });
@@ -185,7 +194,6 @@ dropZone.addEventListener('drop', async e => {
 });
 
 async function importFile(file) {
-  setMsg(`Reading ${file.name}…`, 'ok');
   setButtons({ importDisabled: true, clearDisabled: true });
 
   try {
@@ -231,6 +239,10 @@ async function importFile(file) {
       type: 'import-file-start', langCode: LANG_CODE, lang: LANG_NAME, totalSize: entries.length,
     });
 
+    // Kick off polling so the status dot + entry counter drive the UI,
+    // same as the URL import path.
+    pollTimer = setTimeout(refreshDbStatus, 400);
+
     for (let i = 0; i < entries.length; i += FILE_BATCH) {
       const batch  = entries.slice(i, i + FILE_BATCH);
       const isLast = i + FILE_BATCH >= entries.length;
@@ -238,12 +250,7 @@ async function importFile(file) {
         type: 'import-file-chunk', langCode: LANG_CODE,
         data: batch, meta: isLast ? meta : null, done: isLast,
       });
-      const pct = Math.round(100 * Math.min(i + FILE_BATCH, entries.length) / entries.length);
-      setMsg(`Importing… ${pct}%`, 'ok');
     }
-
-    setMsg('Done!', 'ok');
-    pollTimer = setTimeout(refreshDbStatus, 400);
 
   } catch (err) {
     setMsg(err.message, 'err');

@@ -766,6 +766,12 @@ browser.runtime.onMessage.addListener((msg, _sender) => {
     // background can fetch a URL itself.
     case 'import-url': {
       const { url, langCode, lang } = msg;
+      // Only allow fetching from kaikki.org — prevent background fetch abuse
+      let parsed;
+      try { parsed = new URL(url); } catch { return Promise.reject(new Error('Invalid URL')); }
+      if (parsed.hostname !== 'kaikki.org') {
+        return Promise.reject(new Error(`Fetch refused: only kaikki.org is permitted (got ${parsed.hostname})`));
+      }
       return startImportFromUrl(url, langCode, lang).then(() => ({ ok: true }));
     }
 
@@ -809,7 +815,7 @@ async function startImportFromUrl(url, langCode, lang) {
 
   // Pre-set an approximate total so the progress bar is meaningful from the start.
   // German kaikki has ~1.3 M entries; other languages vary but this is harmless.
-  importState = { status: 'running', lang: langCode, total: 1350000, done: 0, error: null };
+  importState = { status: 'downloading', lang: langCode, total: 1350000, done: 0, error: null };
 
   // Run async, don't await (fire-and-forget; popup polls import-status)
   runImport(url, langCode, lang).catch(err => {
@@ -830,11 +836,14 @@ async function runImport(url, langCode, lang) {
   const response = await fetch(url);
   if (!response.ok) throw new Error(`HTTP ${response.status} fetching ${url}`);
 
-  // Decompress gzip if the URL ends in .gz or server signals it
+  // Response received — switch from downloading to importing
+  importState.status = 'running';
+
+  // Only manually decompress if the URL explicitly ends in .gz (a pre-built file).
+  // fetch() already transparently decompresses Content-Encoding:gzip — checking
+  // that header and decompressing again would corrupt the stream.
   let body = response.body;
-  const isGzip = url.endsWith('.gz') ||
-    (response.headers.get('content-encoding') ?? '').includes('gzip') ||
-    (response.headers.get('content-type') ?? '').includes('gzip');
+  const isGzip = url.endsWith('.gz');
   if (isGzip && typeof DecompressionStream !== 'undefined') {
     body = body.pipeThrough(new DecompressionStream('gzip'));
   }

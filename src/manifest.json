@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Hoverleser",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Hover over a German word to instantly see its translation, gender, pronunciation and grammar. Offline \u2014 no data sent anywhere.",
   "permissions": [
     "storage",
@@ -45,5 +45,6 @@
       "id": "addon@hoverleser.app",
       "strict_min_version": "70.0"
     }
-  }
+  },
+  "content_security_policy": "script-src 'self'; object-src 'self'"
 }
