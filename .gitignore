@@ -1,0 +1,18 @@
+# Secrets / environment
+.env
+.env.*
+*.pem
+*.key
+
+# Claude Code session data
+.claude/
+
+# Session transcripts / local docs
+docs/
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+*.swp
