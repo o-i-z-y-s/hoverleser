@@ -10,6 +10,9 @@ const KAIKKI_DE_URL = 'https://kaikki.org/dictionary/German/kaikki.org-dictionar
 const LANG_CODE = 'de';
 const LANG_NAME = 'German';
 
+document.getElementById('brand-version').textContent =
+  'v' + browser.runtime.getManifest().version;
+
 // ── Elements ──────────────────────────────────────────────────────────────
 const toggleEnabled = document.getElementById('toggle-enabled');
 const toggleIpa     = document.getElementById('toggle-ipa');
