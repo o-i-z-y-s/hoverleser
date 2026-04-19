@@ -35,7 +35,7 @@
   };
 
   // ── State ────────────────────────────────────────────────────────────────
-  let settings    = { enabled: true, langCode: 'de', showIpa: true, showTags: true, showGender: true, maxSenses: 3 };
+  let settings    = { enabled: false, langCode: 'de', showIpa: true, showTags: true, showGender: true, maxSenses: 3 };
   let currentWord = null;   // word string currently shown
   let hoverTimer  = null;
   let lastX = 0, lastY = 0;
@@ -619,7 +619,7 @@
       // Cache hit — synchronous path, no flicker
       const cached = cacheGet(word, settings.langCode);
       if (cached !== undefined) {
-        if (currentWord !== word) return;
+        if (currentWord !== word || !settings.enabled) return;
         if (cached) {
           if (rect.width > 0) showHighlight(rect);
           renderResult(cached);
@@ -631,7 +631,8 @@
 
       // DB lookup (fast — local IndexedDB, typically <5 ms)
       const result = await lookup(word);
-      if (currentWord !== word) return; // word changed while awaiting
+      // Guard: word changed or extension was disabled while awaiting
+      if (currentWord !== word || !settings.enabled) return;
 
       if (result) {
         if (rect.width > 0) showHighlight(rect);

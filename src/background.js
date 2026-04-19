@@ -709,14 +709,19 @@ async function setDbMeta(db, meta) {
 
 async function getSettings() {
   const result = await browser.storage.local.get('settings');
-  return result.settings ?? defaultSettings();
+  // Merge stored settings over defaults so any missing key uses a safe fallback
+  // rather than potentially reverting enabled:false → enabled:true.
+  return Object.assign(defaultSettings(), result.settings ?? {});
 }
 
 function defaultSettings() {
   return {
-    enabled:  true,
-    langCode: 'de',
-    showIpa:  true,
+    enabled:    false,
+    langCode:   'de',
+    showIpa:    true,
+    showTags:   true,
+    showGender: true,
+    maxSenses:  3,
   };
 }
 
@@ -769,8 +774,8 @@ browser.runtime.onMessage.addListener((msg, _sender) => {
       // Only allow fetching from kaikki.org — prevent background fetch abuse
       let parsed;
       try { parsed = new URL(url); } catch { return Promise.reject(new Error('Invalid URL')); }
-      if (parsed.hostname !== 'kaikki.org') {
-        return Promise.reject(new Error(`Fetch refused: only kaikki.org is permitted (got ${parsed.hostname})`));
+      if (parsed.hostname !== 'kaikki.org' || parsed.protocol !== 'https:') {
+        return Promise.reject(new Error(`Fetch refused: only https://kaikki.org is permitted (got ${parsed.protocol}//${parsed.hostname})`));
       }
       return startImportFromUrl(url, langCode, lang).then(() => ({ ok: true }));
     }

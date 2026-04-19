@@ -54,7 +54,9 @@ async function init() {
 async function saveSettings() {
   settings.langCode = LANG_CODE; // always German
   await browser.runtime.sendMessage({ type: 'set-settings', settings });
-  const tabs = await browser.tabs.query({ active: true });
+  // Broadcast to every tab so all content scripts update immediately,
+  // not just the currently active one.
+  const tabs = await browser.tabs.query({});
   for (const tab of tabs) {
     browser.tabs.sendMessage(tab.id, { type: 'settings-changed', settings }).catch(() => {});
   }

@@ -1,0 +1,60 @@
+# Hoverleser — AMO Listed Submission Workflow
+#
+# Submits the extension to Mozilla AMO for public listing / human review.
+# This is separate from the release workflow which signs for unlisted distribution.
+#
+# Run manually from the Actions tab when you are ready to submit or resubmit.
+#
+# Required repository secrets (Settings → Secrets → Actions):
+#   AMO_API_KEY     — from addons.mozilla.org/developers → API Keys
+#   AMO_API_SECRET  — same page
+
+name: Submit to AMO (Listed)
+
+"on":
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type SUBMIT to confirm submission to Mozilla for public listing'
+        required: true
+
+jobs:
+  submit:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.confirm == 'SUBMIT' }}
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install web-ext
+        run: npm install -g web-ext
+
+      - name: Read version
+        id: version
+        run: |
+          VERSION=$(node -p "require('./src/manifest.json').version")
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Submit to AMO for listed review
+        env:
+          AMO_API_KEY:    ${{ secrets.AMO_API_KEY }}
+          AMO_API_SECRET: ${{ secrets.AMO_API_SECRET }}
+        working-directory: src
+        run: |
+          web-ext sign \
+            --source-dir . \
+            --artifacts-dir dist \
+            --api-key    "$AMO_API_KEY" \
+            --api-secret "$AMO_API_SECRET" \
+            --channel    listed
+
+      - name: Done
+        run: |
+          echo "Submitted v${{ steps.version.outputs.VERSION }} to AMO for listed review."
+          echo "Check review status at: https://addons.mozilla.org/developers/addon/hoverleser/versions"
