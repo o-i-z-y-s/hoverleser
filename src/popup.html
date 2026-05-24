@@ -130,6 +130,30 @@
     }
     .popup-import-note a { color: #5a8a6a; text-decoration: underline; cursor: pointer; }
 
+    /* Sample words panel — tab view only */
+    .sample-panel { display: none; border-top: 1px solid #262626; }
+    @media (min-width: 500px) {
+      .sample-panel   { display: block; padding: 0 20px; }
+      .sample-summary {
+        display: flex; align-items: center; gap: 7px;
+        padding: 11px 0; font-size: 15px; color: #888;
+        cursor: pointer; user-select: none; list-style: none;
+      }
+      .sample-summary::-webkit-details-marker { display: none; }
+      .sample-summary::before {
+        content: '▶'; font-size: 9px; color: #555;
+        transition: transform .15s; display: inline-block; flex-shrink: 0;
+      }
+      .sample-panel[open] .sample-summary::before { transform: rotate(90deg); }
+      .sample-body      { padding-bottom: 18px; display: flex; flex-direction: column; gap: 14px; }
+      .sample-cat-label { font-size: 11px; color: #666; text-transform: uppercase;
+                          letter-spacing: 0.08em; margin-bottom: 6px; }
+      .sample-words     { display: flex; flex-wrap: wrap; gap: 5px; }
+      .sample-word      { font-size: 14px; background: #202020; border: 1px solid #2a2a2a;
+                          border-radius: 5px; padding: 3px 10px; color: #bbb;
+                          cursor: default; user-select: none; }
+    }
+
     /* Tab overrides: must be LAST so they win over base styles */
     @media (min-width: 500px) {
       body {
@@ -256,6 +280,82 @@
     <div class="msg" id="import-msg"></div>
     <button class="btn btn-ghost" id="btn-clear">Remove dictionary</button>
   </div>
+
+  <details class="sample-panel" id="sample-panel">
+    <summary class="sample-summary">Sample words &nbsp;&middot;&nbsp; hover to test</summary>
+    <div class="sample-body">
+
+      <div class="sample-cat">
+        <div class="sample-cat-label">Nouns</div>
+        <div class="sample-words">
+          <span class="sample-word">Haus</span>
+          <span class="sample-word">Hund</span>
+          <span class="sample-word">Straße</span>
+          <span class="sample-word">Börse</span>
+          <span class="sample-word">Wörterbuch</span>
+          <span class="sample-word">Mensch</span>
+          <span class="sample-word">Bank</span>
+        </div>
+      </div>
+
+      <div class="sample-cat">
+        <div class="sample-cat-label">Verbs</div>
+        <div class="sample-words">
+          <span class="sample-word">kaufen</span>
+          <span class="sample-word">laufen</span>
+          <span class="sample-word">sprechen</span>
+          <span class="sample-word">schreiben</span>
+          <span class="sample-word">entwickeln</span>
+          <span class="sample-word">fragen</span>
+        </div>
+      </div>
+
+      <div class="sample-cat">
+        <div class="sample-cat-label">Inflected forms</div>
+        <div class="sample-words">
+          <span class="sample-word">Häuser</span>
+          <span class="sample-word">Wörterbücher</span>
+          <span class="sample-word">Straßen</span>
+          <span class="sample-word">Fragen</span>
+          <span class="sample-word">Sprachen</span>
+        </div>
+      </div>
+
+      <div class="sample-cat">
+        <div class="sample-cat-label">Past participles</div>
+        <div class="sample-words">
+          <span class="sample-word">gesprochen</span>
+          <span class="sample-word">gelaufen</span>
+          <span class="sample-word">geschrieben</span>
+          <span class="sample-word">gefunden</span>
+          <span class="sample-word">gegangen</span>
+        </div>
+      </div>
+
+      <div class="sample-cat">
+        <div class="sample-cat-label">Compound words</div>
+        <div class="sample-words">
+          <span class="sample-word">Hausarbeit</span>
+          <span class="sample-word">Straßenbahn</span>
+          <span class="sample-word">Tageslicht</span>
+          <span class="sample-word">Wörterbuchsuche</span>
+          <span class="sample-word">Hundeleine</span>
+        </div>
+      </div>
+
+      <div class="sample-cat">
+        <div class="sample-cat-label">Adjectives &amp; derived forms</div>
+        <div class="sample-words">
+          <span class="sample-word">schön</span>
+          <span class="sample-word">sprachlich</span>
+          <span class="sample-word">außerbörsliche</span>
+          <span class="sample-word">gehandelte</span>
+          <span class="sample-word">strafbar</span>
+        </div>
+      </div>
+
+    </div>
+  </details>
 
   <div class="footer">
     Data: <a href="https://kaikki.org" target="_blank">Wiktionary · kaikki.org</a> · CC BY-SA
