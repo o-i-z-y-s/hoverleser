@@ -137,7 +137,7 @@ Usage: node scripts/build-dict.js --lang <Language> --out dist/<code>.jsonl
   --url  <url>    Override source URL
   --max  <n>      Process at most <n> entries (for quick testing)
   --no-forms      Skip inflected-forms index (smaller file, worse inflection lookup)
-  --compress      Gzip the output (.jsonl.gz, ~75% smaller — recommended)
+  --compress      Gzip the output (.jsonl.gz, ~75% smaller; recommended)
 
 Available codes: ${Object.keys(LANG_MAP).join(', ')}
 
@@ -148,7 +148,7 @@ Example:
 
 // ── Processing ────────────────────────────────────────────────────────────
 
-const MAX_SENSES = 3;   // top 3 senses per entry — keeps files lean
+const MAX_SENSES = 3;   // top 3 senses per entry; keeps files lean
 const MAX_FORMS  = 40;  // max inflected forms stored per entry
 
 // Parts of speech that are useful
@@ -229,7 +229,7 @@ function processEntry(raw, includeforms) {
     const t  = (s.tags ?? [])
       .filter(t => !NOISE_TAGS.has(t) && !GENDER_TAGS[t]);
 
-    // Capture form_of tags — the grammatical relationship info kaikki stores separately
+    // Capture form_of tags: the grammatical relationship info kaikki stores separately
     const formOfTags = (s.form_of ?? [])
       .flatMap(fo => fo.tags ?? [])
       .filter(t => FORM_KEEP.has(t) && !FORM_NOISE.has(t));
@@ -279,7 +279,7 @@ async function* streamLines(url) {
   console.log(`Downloading: ${url}`);
   console.log('(This may take a while for large language files…)\n');
 
-  // Node 18+ native fetch — set User-Agent so kaikki.org doesn't block CI runners
+  // Node 18+ native fetch; set User-Agent so kaikki.org does not block CI runners
   const resp = await fetch(url, {
     headers: { 'User-Agent': 'Hoverleser-BuildScript/1.0 (https://github.com/o-i-z-y-s/hoverleser)' }
   });
@@ -315,7 +315,7 @@ async function main() {
   // Ensure output directory exists
   fs.mkdirSync(path.dirname(path.resolve(opts.out)), { recursive: true });
 
-  // Output stream — plain or gzip-compressed
+  // Output stream: plain or gzip-compressed
   const rawStream = fs.createWriteStream(opts.out);
   const outStream = opts.compress
     ? (() => { const gz = zlib.createGzip({ level: 6 }); gz.pipe(rawStream); return gz; })()

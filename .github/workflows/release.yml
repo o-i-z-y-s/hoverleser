@@ -37,10 +37,6 @@ jobs:
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
           echo "TAG=v$VERSION" >> $GITHUB_OUTPUT
 
-      - name: Build unsigned XPI
-        working-directory: src
-        run: bash package.sh build
-
       - name: Sign via AMO
         id: sign
         continue-on-error: true
@@ -48,17 +44,7 @@ jobs:
           AMO_API_KEY:    ${{ secrets.AMO_API_KEY }}
           AMO_API_SECRET: ${{ secrets.AMO_API_SECRET }}
         working-directory: src
-        run: |
-          web-ext sign \
-            --source-dir . \
-            --artifacts-dir dist \
-            --api-key    "$AMO_API_KEY" \
-            --api-secret "$AMO_API_SECRET" \
-            --channel    unlisted
-          SIGNED=$(ls dist/*.xpi | grep -v unsigned | head -1)
-          if [ -n "$SIGNED" ]; then
-            cp "$SIGNED" "dist/hoverleser-${{ steps.version.outputs.VERSION }}-signed.xpi"
-          fi
+        run: bash package.sh sign
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -68,14 +54,17 @@ jobs:
           body: |
             ## Hoverleser ${{ steps.version.outputs.TAG }}
 
-            Hover over any German word in Firefox to see its translation, gender, IPA pronunciation and grammatical forms. Fully offline after one-time dictionary import.
+            Hover over any German word to see its translation, gender, IPA pronunciation and grammatical forms. Fully offline after one-time dictionary import. Supports Firefox and Chromium-based browsers.
 
-            ### Install
-            Download the signed `.xpi` and drag it onto any Firefox window.
+            ### Firefox
+            Download `hoverleser-*-firefox.xpi` and drag it onto any Firefox window.
+
+            ### Chrome / Chromium
+            Download `hoverleser-*-chrome.zip`, unzip to a permanent folder, then load via `chrome://extensions` > Developer mode > Load unpacked.
 
             ### Dictionary
-            Download `de-v*.jsonl.gz`, open the extension in a full tab, drag the file onto the import area and wait for the green dot.
-          files: src/dist/hoverleser-*.xpi
+            Download `de-v*.jsonl.gz`, open the extension settings, drag the file onto the import area and wait for the green dot.
+          files: src/dist/hoverleser-*-firefox.xpi
           draft: false
           prerelease: false
           make_latest: true
@@ -105,5 +94,5 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.TAG }}
-          files: src/dist/hoverleser-chrome-*.zip
+          files: src/dist/hoverleser-*-chrome.zip
           fail_on_unmatched_files: true

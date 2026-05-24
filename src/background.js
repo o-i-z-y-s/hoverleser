@@ -287,19 +287,19 @@ async function lookupWordAsSuffix(db, word, langCode = 'de') {
   // If there's a real direct entry with senses, show only that.
   const direct = await lookupDirectEntry(db, wordLower);
   if (direct) return { segments: [{ matchedText: word, entries: [direct] }] };
-  // No direct entry — fall back to full lookup (handles inflected suffix forms).
+  // No direct entry; fall back to full lookup (handles inflected suffix forms).
   return lookupWord(db, word, langCode);
 }
 
 /**
  * Restrict compound-prefix matching to direct lemma entries only.
  * Inflected forms (from the forms index) are valid words but not valid compound
- * prefixes — e.g. "Wörter" (plural of Wort) should not split "Wörterbüchsuche".
+ * prefixes, e.g. "Wörter" (plural of Wort) should not split "Wörterbüchsuche".
  * We also try stripping a trailing Fugen-s so "Hochzeits-" maps to "Hochzeit".
  */
 async function lookupDirectEntry(db, key) {
   const entry = await idbGet(db, 'entries', key);
-  // Reject missing, empty, or all-form-of entries — inflected/variant forms like
+  // Reject missing, empty, or all-form-of entries: inflected/variant forms like
   // "Wörter" (nominative plural of Wort) must not serve as compound prefixes.
   if (!entry || (entry.s ?? []).length === 0) return null;
   if (entryIsAllFormOf(entry)) return null;
@@ -309,11 +309,11 @@ async function lookupDirectEntry(db, key) {
 /**
  * Look up a word in the DB.
  *
- * Priority order — always biased toward the full word:
+ * Priority order (always biased toward the full word):
  *
  *   1. Exact entry match on full word (direct lemma key).
  *   2. Forms-index lookup on full word (inflected → lemma).
- *   3. Compound splitting (German only) — ONLY when:
+ *   3. Compound splitting (German only): ONLY when:
  *        • prefix is ≥ 4 characters
  *        • suffix is ≥ 3 characters
  *        • suffix ALSO resolves in the dictionary
@@ -333,7 +333,7 @@ async function lookupWord(db, word, langCode = 'de') {
     return { segments: [{ matchedText: word, entries: full }] };
   }
 
-  // Compound splitting — German only; other languages don't use the same
+  // Compound splitting: German only; other languages do not use the same
   // closed-compound convention and Fugen-s stripping would be wrong for them.
   if (langCode !== 'de') return null;
 
@@ -566,7 +566,7 @@ async function lookupCandidate(db, candidate, originalWord, _depth = 0, langCode
   }
 
   if (collected.length === 0) {
-    // Morphological fallback — German only; guard with _depth so we never
+    // Morphological fallback: German only; guard with _depth so we never
     // recurse more than one level.
     if (_depth === 0 && langCode === 'de') {
       const stems = germanDeinflect(candidate);
@@ -596,7 +596,7 @@ async function lookupCandidate(db, candidate, originalWord, _depth = 0, langCode
   const all = [...seen.values()]
     .filter(e => (e.s ?? []).length > 0)
     .map(e => { const {_dedup, ...rest} = e; return rest; });
-  // When a non-alt-of entry exists, drop any alt-of entries — they are
+  // When a non-alt-of entry exists, drop any alt-of entries: they are
   // old/variant spellings that add noise when the canonical form is already shown.
   const nonAltOf = all.filter(e => !hasAltOf(e));
   return nonAltOf.length > 0 ? nonAltOf : all;
@@ -608,7 +608,7 @@ async function lookupCandidate(db, candidate, originalWord, _depth = 0, langCode
  * and substitute real definitions, annotating with gramTags.
  *
  * Entries that already have gramTags set (annotated by lookupCandidate via
- * the forms index) pass through unchanged — their annotation is authoritative.
+ * the forms index) pass through unchanged; their annotation is authoritative.
  *
  * No gramNote is produced; the tag badges carry all needed information.
  */
@@ -661,7 +661,7 @@ async function resolveFormOf(db, entries) {
         const dbEntry = await idbGet(db, 'entries', key);
         if (dbEntry && !entryIsAllFormOf(dbEntry)) baseEntry = dbEntry;
       }
-      // 3. Forms index fallback — runs if no baseEntry yet, OR if step 2 found one
+      // 3. Forms index fallback: runs if no baseEntry yet, OR if step 2 found one
       //    with zero senses (step 3 was skipped but the gap still needs filling).
       if (!baseEntry || (baseEntry.s ?? []).length === 0) {
         const bf = await idbGet(db, 'forms', key);
@@ -676,7 +676,7 @@ async function resolveFormOf(db, entries) {
 
     if (baseEntry && (baseEntry.s ?? []).length > 0 && !entryIsAllFormOf(baseEntry)) {
       // Happy path: base found with real definitions.
-      // Push only the plain base lemma — the form-of entry already carries
+      // Push only the plain base lemma; the form-of entry already carries
       // the grammatical role (gramTags / PAST PARTICIPLE etc.) separately,
       // so duplicating the base senses under the surface word's header is noise.
       if (!byKey.has(baseEntry.k) || entryIsAllFormOf(byKey.get(baseEntry.k))) {
@@ -739,13 +739,19 @@ let importState = {
 // ── Message router ─────────────────────────────────────────────────────────
 
 browser.runtime.onMessage.addListener((msg, sender) => {
-  // Content-script senders always carry a populated sender.tab; extension-page
-  // senders (popup) do not. Reject write operations from content scripts so a
-  // compromised page cannot trigger dictionary mutations via the content script.
+  // Extension pages (popup, options, setup tab opened as a full tab) always have
+  // a sender.url beginning with the extension scheme. Content scripts running in
+  // web pages have http/https URLs. Use the URL (not sender.tab) as the
+  // authoritative signal, because popup.html opened as a tab carries sender.tab
+  // but is still a trusted extension page.
+  const isExtensionPage =
+    typeof sender.url === 'string' &&
+    (sender.url.startsWith('moz-extension://') ||
+     sender.url.startsWith('chrome-extension://'));
   const extensionOnly = () =>
-    sender.tab !== undefined
-      ? Promise.reject(new Error('Permission denied'))
-      : null;
+    isExtensionPage
+      ? null
+      : Promise.reject(new Error('Permission denied'));
 
   switch (msg.type) {
 
@@ -795,7 +801,7 @@ browser.runtime.onMessage.addListener((msg, sender) => {
       const denied = extensionOnly();
       if (denied) return denied;
       const { url, langCode, lang } = msg;
-      // Only allow fetching from kaikki.org — prevent background fetch abuse
+      // Only allow fetching from kaikki.org: prevent background fetch abuse
       let parsed;
       try { parsed = new URL(url); } catch { return Promise.reject(new Error('Invalid URL')); }
       if (parsed.hostname !== 'kaikki.org' || parsed.protocol !== 'https:') {
@@ -870,11 +876,11 @@ async function runImport(url, langCode, lang) {
   const response = await fetch(url);
   if (!response.ok) throw new Error(`HTTP ${response.status} fetching ${url}`);
 
-  // Response received — switch from downloading to importing
+  // Response received: switch from downloading to importing
   importState.status = 'running';
 
   // Only manually decompress if the URL explicitly ends in .gz (a pre-built file).
-  // fetch() already transparently decompresses Content-Encoding:gzip — checking
+  // fetch() already transparently decompresses Content-Encoding:gzip; checking
   // that header and decompressing again would corrupt the stream.
   let body = response.body;
   const isGzip = url.endsWith('.gz');
@@ -964,7 +970,7 @@ browser.runtime.onInstalled.addListener(async ({ reason }) => {
 
   // On fresh install open popup.html as a tab so the user sees the
   // onboarding prompt immediately. A tab (not a popup window) is the only
-  // reliable way to do this from a background script — browserAction.openPopup()
+  // reliable way to do this from a background script. browserAction.openPopup()
   // requires a real user gesture. This is standard practice (uBlock, 1Password, etc.).
   if (reason === 'install') {
     setTimeout(() => {
@@ -1060,7 +1066,7 @@ function dedupeStreamBatch(records, state) {
         // Upgrade: a real-definition entry supersedes the stored form-of entry.
         formOfSet.delete(entry.k);
         if (entry.p) posSeen.set(entry.k, entry.p);
-        // fall through — include this entry
+        // fall through: include this entry
       } else if (!entryIsFormOf && !formOfSet.has(entry.k)) {
         // Two real entries share the same key.
         const prevPos = posSeen.get(entry.k);
