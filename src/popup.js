@@ -202,7 +202,7 @@ async function importFile(file) {
   setButtons({ importDisabled: true, clearDisabled: true });
 
   try {
-    // Stream the file — never load the whole thing into memory at once.
+    // Stream the file; never load the whole thing into memory at once.
     // For .gz, pipe through DecompressionStream before decoding text.
     let stream = file.stream();
     if (file.name.endsWith('.gz')) {
@@ -235,7 +235,7 @@ async function importFile(file) {
       type: 'import-file-start', langCode: LANG_CODE, lang: LANG_NAME, totalSize: total,
     });
 
-    // Start polling — status dot + entry counter now drive the UI
+    // Start polling; status dot + entry counter now drive the UI
     pollTimer = setTimeout(refreshDbStatus, 400);
 
     // Stream remaining content in batches
@@ -280,7 +280,7 @@ async function importFile(file) {
       } catch {}
     }
 
-    if (!gotEntry) throw new Error('No entries found — is this a valid .jsonl dictionary file?');
+    if (!gotEntry) throw new Error('No entries found. Is this a valid .jsonl dictionary file?');
 
     await flushBatch(true);
 

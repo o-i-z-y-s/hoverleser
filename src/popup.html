@@ -21,6 +21,7 @@
     .header-text { display: flex; flex-direction: column; }
     .brand-name { font-size: 17px; font-weight: 800; color: #e8e8e8; letter-spacing: -0.5px; }
     .brand-sub  { font-size: 10px; color: #888; margin-top: 2px; }
+    #brand-version { font-style: italic; }
 
     .btn-open-tab {
       flex-shrink: 0;
@@ -129,7 +130,7 @@
     }
     .popup-import-note a { color: #5a8a6a; text-decoration: underline; cursor: pointer; }
 
-    /* Tab overrides — must be LAST so they win over base styles */
+    /* Tab overrides: must be LAST so they win over base styles */
     @media (min-width: 500px) {
       body {
         width: 100%; min-height: 100vh;
@@ -229,10 +230,10 @@
   </div>
 
   <div class="onboarding" id="onboarding">
-    <strong>① GitHub Releases</strong> — pre-built, ~20 MB. Download <code>de-v*.jsonl.gz</code>
+    <strong>① GitHub Releases</strong>: pre-built, ~20 MB. Download <code>de-v*.jsonl.gz</code>
     from the <a href="https://github.com/o-i-z-y-s/hoverleser/releases/latest" target="_blank" style="color:#5a8a6a">Releases page</a>, then drag it below.<br><br>
-    <strong>② Build your own</strong> — run <code>build-dict.js</code> and drag the output below.<br><br>
-    <strong>③ kaikki.org</strong> — always current but ~930 MB, processed in-browser. Use the button below.
+    <strong>② Build your own</strong>: run <code>build-dict.js</code> and drag the output below.<br><br>
+    <strong>③ kaikki.org</strong>: always current but ~930 MB, processed in-browser. Use the button below.
   </div>
 
   <div class="import-panel">

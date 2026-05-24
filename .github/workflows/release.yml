@@ -1,10 +1,10 @@
-# Hoverleser — GitHub Actions release workflow
+# Hoverleser: GitHub Actions release workflow
 # Triggers on every push to main.
 # Produces a signed XPI via AMO (unlisted) and publishes it as a GitHub Release.
 #
 # Required repository secrets (Settings → Secrets → Actions):
-#   AMO_API_KEY     — from addons.mozilla.org/developers → API Keys
-#   AMO_API_SECRET  — same page
+#   AMO_API_KEY:     addons.mozilla.org/developers, API Keys
+#   AMO_API_SECRET: same page
 
 name: Build & Release
 
@@ -79,3 +79,25 @@ jobs:
           draft: false
           prerelease: false
           make_latest: true
+
+      - name: Update updates.json
+        if: steps.sign.outcome == 'success'
+        env:
+          VERSION: ${{ steps.version.outputs.VERSION }}
+          REPO: ${{ github.repository }}
+        run: |
+          SIGNED="src/dist/hoverleser-${VERSION}-signed.xpi"
+          [ -f "$SIGNED" ] || { echo "Signed XPI not found, skipping."; exit 0; }
+          HASH=$(sha256sum "$SIGNED" | awk '{print $1}')
+          URL="https://github.com/${REPO}/releases/download/v${VERSION}/hoverleser-${VERSION}-signed.xpi"
+          jq -n \
+            --arg ver  "$VERSION" \
+            --arg url  "$URL" \
+            --arg hash "sha256:$HASH" \
+            '{"addons":{"addon@hoverleser.app":{"updates":[{"version":$ver,"update_link":$url,"update_hash":$hash}]}}}' \
+            > updates.json
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add updates.json
+          git diff --cached --quiet || git commit -m "chore: update updates.json for v${VERSION} [skip ci]"
+          git push

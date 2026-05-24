@@ -726,7 +726,15 @@ let importState = {
 
 // ── Message router ─────────────────────────────────────────────────────────
 
-browser.runtime.onMessage.addListener((msg, _sender) => {
+browser.runtime.onMessage.addListener((msg, sender) => {
+  // Content-script senders always carry a populated sender.tab; extension-page
+  // senders (popup) do not. Reject write operations from content scripts so a
+  // compromised page cannot trigger dictionary mutations via the content script.
+  const extensionOnly = () =>
+    sender.tab !== undefined
+      ? Promise.reject(new Error('Permission denied'))
+      : null;
+
   switch (msg.type) {
 
     // ── Word lookup ──────────────────────────────────────────────────────
@@ -751,13 +759,29 @@ browser.runtime.onMessage.addListener((msg, _sender) => {
     }
 
     case 'set-settings': {
-      return browser.storage.local.set({ settings: msg.settings }).then(() => ({ ok: true }));
+      const denied = extensionOnly();
+      if (denied) return denied;
+      // Validate and sanitize every field before persisting.
+      // This prevents a malicious content-script message from corrupting settings.
+      const raw = msg.settings ?? {};
+      const safe = {
+        enabled:    typeof raw.enabled    === 'boolean' ? raw.enabled    : false,
+        langCode:   typeof raw.langCode   === 'string'  ? raw.langCode.slice(0, 8) : 'de',
+        showIpa:    typeof raw.showIpa    === 'boolean' ? raw.showIpa    : true,
+        showTags:   typeof raw.showTags   === 'boolean' ? raw.showTags   : true,
+        showGender: typeof raw.showGender === 'boolean' ? raw.showGender : true,
+        maxSenses:  Number.isInteger(raw.maxSenses) && raw.maxSenses >= 1 && raw.maxSenses <= 10
+                      ? raw.maxSenses : 3,
+      };
+      return browser.storage.local.set({ settings: safe }).then(() => ({ ok: true }));
     }
 
     // ── Import dictionary from JSONL text ────────────────────────────────
     // The popup sends chunks of the JSONL file one at a time, or the
     // background can fetch a URL itself.
     case 'import-url': {
+      const denied = extensionOnly();
+      if (denied) return denied;
       const { url, langCode, lang } = msg;
       // Only allow fetching from kaikki.org — prevent background fetch abuse
       let parsed;
@@ -770,6 +794,11 @@ browser.runtime.onMessage.addListener((msg, _sender) => {
 
     // ── Clear / reset DB ─────────────────────────────────────────────────
     case 'clear-db': {
+      const denied = extensionOnly();
+      if (denied) return denied;
+      if (importState.status === 'running' || importState.status === 'downloading') {
+        return Promise.reject(new Error('Cannot clear while import is in progress'));
+      }
       const { langCode } = msg;
       return openDb(langCode).then(async db => {
         await idbClear(db, 'entries');
@@ -780,6 +809,8 @@ browser.runtime.onMessage.addListener((msg, _sender) => {
     }
 
     case 'import-file-start': {
+      const denied = extensionOnly();
+      if (denied) return denied;
       const { langCode, lang, totalSize } = msg;
       return startImportFromFileStream(langCode, lang, totalSize)
         .then(() => ({ ok: true }))
@@ -787,6 +818,8 @@ browser.runtime.onMessage.addListener((msg, _sender) => {
     }
 
     case 'import-file-chunk': {
+      const denied = extensionOnly();
+      if (denied) return denied;
       const { langCode, data, meta, done } = msg;
       return receiveFileChunk(langCode, data, meta ?? null, done)
         .then(() => ({ ok: true }))
@@ -1041,6 +1074,7 @@ function dedupeStreamBatch(records, state) {
 // Receives batches of already-parsed entry objects from popup.js.
 // 'data' is an array of entry objects; 'meta' is the metadata object (on last chunk).
 async function receiveFileChunk(langCode, data, metaObj, isLast) {
+  if (!fileImportState.db) throw new Error('No import session active; send import-file-start first');
   if (Array.isArray(data) && data.length > 0) {
     const filtered = dedupeStreamBatch(data, fileImportState);
     if (filtered.length > 0) {

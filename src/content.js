@@ -286,7 +286,7 @@
     }
     if (offset >= text.length || !isWord(text[offset])) return null;
 
-    // Expand left — stop at hyphens so each part of a hyphenated compound
+    // Expand left; stop at hyphens so each part of a hyphenated compound
     // is looked up independently when the cursor moves across it.
     let start = offset;
     while (start > 0 && isWord(text[start - 1])) start--;
@@ -378,7 +378,7 @@
     // gramTags first (they come from authoritative form_of data)
     for (const t of (entry.gramTags ?? [])) addTag(t);
 
-    // Sense-level t-tags — skip generic noise we don't want to badge
+    // Sense-level t-tags: skip generic noise we don't want to badge
     const T_NOISE = new Set(['form-of','canonical','error-unknown-tag','with-dative','with-accusative','with-genitive']);
     for (const sense of (entry.s ?? [])) {
       for (const t of (sense.t ?? [])) {
@@ -414,7 +414,7 @@
         <span class="hd-pos">${esc(entry.p ?? '')}</span>
       </div>`;
 
-      // Unified, ordered tag row — one per entry, directly below the word header
+      // Unified, ordered tag row; one per entry, directly below the word header
       if (settings.showTags !== false) html += buildTagRow(entry);
 
       if (settings.showIpa && entry.i) {
@@ -532,7 +532,7 @@
 
     clearTimeout(hoverTimer);
 
-    // Fast-clear if pointer is provably outside the current highlight rect —
+    // Fast-clear if pointer is provably outside the current highlight rect;
     // no need to wait for getWordAtPoint when we can dismiss immediately.
     if (currentWord && highlight.style.display !== 'none') {
       const hr = highlight.getBoundingClientRect();
@@ -556,7 +556,7 @@
       return;
     }
 
-    // Same word — just reposition the popup if it's visible
+    // Same word: just reposition the popup if it's visible
     if (wordInfo.word === currentWord) {
       if (popup.style.display === 'block') placePopup(lastX, lastY);
       return;
@@ -567,14 +567,14 @@
     // Capture range rect now (valid while we still have the range object)
     const rect = wordInfo.range.getBoundingClientRect();
 
-    // Fire lookup immediately — IndexedDB is local so results come back fast.
+    // Fire lookup immediately; IndexedDB is local so results come back fast.
     // We intentionally do NOT show highlight or popup until a result is found:
     // that way only words that exist in the chosen language's dictionary are
     // ever highlighted, matching 10ten's behaviour.
     (async () => {
       const word = wordInfo.word;
 
-      // Cache hit — synchronous path, no flicker
+      // Cache hit: synchronous path, no flicker
       const cached = cacheGet(word, settings.langCode);
       if (cached !== undefined) {
         if (currentWord !== word || !settings.enabled) return;
@@ -587,7 +587,7 @@
         return;
       }
 
-      // DB lookup (fast — local IndexedDB, typically <5 ms)
+      // DB lookup (local IndexedDB, typically <5 ms)
       const result = await lookup(word);
       // Guard: word changed or extension was disabled while awaiting
       if (currentWord !== word || !settings.enabled) return;

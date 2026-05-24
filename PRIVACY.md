@@ -1,4 +1,4 @@
-# Hoverleser — Privacy Policy
+# Hoverleser: Privacy Policy
 
 Last updated: May 2026
 

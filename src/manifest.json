@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Hoverleser",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Hover over a German word to instantly see its translation, gender, pronunciation and grammar. Offline \u2014 no data sent anywhere.",
   "permissions": [
     "storage",
@@ -43,7 +43,8 @@
   "browser_specific_settings": {
     "gecko": {
       "id": "addon@hoverleser.app",
-      "strict_min_version": "70.0"
+      "strict_min_version": "70.0",
+      "update_url": "https://raw.githubusercontent.com/o-i-z-y-s/hoverleser/main/updates.json"
     }
   },
   "content_security_policy": "script-src 'self'; object-src 'self'"

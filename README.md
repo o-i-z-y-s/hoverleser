@@ -10,6 +10,8 @@ Hover over any German word in Firefox to instantly see its translation, gender, 
 2. Firefox will prompt "Allow github.com to install an add-on?" Click **Continue to Installation**, then **Add**
 3. The setup tab opens automatically. Import the dictionary before first use (see below)
 
+Once installed, **updates are automatic.** Firefox checks for new versions roughly every 24 hours and installs them silently in the background.
+
 ---
 
 ## Import the dictionary
@@ -59,7 +61,7 @@ Load it in Firefox via `about:debugging` > Load Temporary Add-on.
 
 | Workflow | Trigger | Output |
 |---|---|---|
-| **Build & Release** (`release.yml`) | Every push to `main` | Signed XPI attached to GitHub Release |
+| **Build & Release** (`release.yml`) | Every push to `main` | Signed XPI attached to GitHub Release; `updates.json` updated so installed extensions auto-update |
 | **Build Dictionary** (`dictionary.yml`) | Push touching build logic, 1st of month, or manual | `de-vX.Y.Z.jsonl.gz` and `.jsonl` attached to same Release |
 | **Submit to AMO Listed** (`amo-listed.yml`) | Manual only (type `SUBMIT` to confirm) | Submits for Mozilla public listing review |
 

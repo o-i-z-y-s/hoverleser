@@ -1,4 +1,4 @@
-# Hoverleser — AMO Listed Submission Workflow
+# Hoverleser: AMO Listed Submission Workflow
 #
 # Submits the extension to Mozilla AMO for public listing / human review.
 # This is separate from the release workflow which signs for unlisted distribution.
@@ -6,8 +6,8 @@
 # Run manually from the Actions tab when you are ready to submit or resubmit.
 #
 # Required repository secrets (Settings → Secrets → Actions):
-#   AMO_API_KEY     — from addons.mozilla.org/developers → API Keys
-#   AMO_API_SECRET  — same page
+#   AMO_API_KEY:     addons.mozilla.org/developers, API Keys
+#   AMO_API_SECRET: same page
 
 name: Submit to AMO (Listed)
 
