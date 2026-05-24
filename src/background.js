@@ -31,6 +31,18 @@
 
 'use strict';
 
+// Chrome MV3 runs the background as a service worker where `browser` is not
+// defined. Import the webextension-polyfill so the rest of this file can use
+// the same browser.* API as the Firefox build.
+if (typeof browser === 'undefined') importScripts('lib/browser-polyfill.min.js');
+
+// True when running as a Chrome MV3 service worker, false in a Firefox MV2
+// background page. Used to enable service-worker-specific behaviour.
+const IS_SERVICE_WORKER = (
+  typeof ServiceWorkerGlobalScope !== 'undefined' &&
+  self instanceof ServiceWorkerGlobalScope
+);
+
 // ── DB registry: langCode → IDBDatabase ───────────────────────────────────
 const openDbs = new Map();
 const DB_VERSION = 1;

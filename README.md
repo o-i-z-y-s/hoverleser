@@ -1,16 +1,29 @@
 # Hoverleser
 
-Hover over any German word in Firefox to instantly see its translation, gender, IPA pronunciation, and grammatical forms. Fully offline after a one-time dictionary import, with nothing ever sent anywhere.
+Hover over any German word to instantly see its translation, gender, IPA pronunciation, and grammatical forms. Fully offline after a one-time dictionary import, with nothing ever sent anywhere.
+
+Supports **Firefox** and **Chromium-based browsers** (Chrome, Edge, Brave, etc.).
 
 ---
 
 ## Install
+
+### Firefox
 
 1. Go to the [latest release](https://github.com/o-i-z-y-s/hoverleser/releases/latest) and click `hoverleser-x.x.x-signed.xpi`
 2. Firefox will prompt "Allow github.com to install an add-on?" Click **Continue to Installation**, then **Add**
 3. The setup tab opens automatically. Import the dictionary before first use (see below)
 
 Once installed, **updates are automatic.** Firefox checks for new versions roughly every 24 hours and installs them silently in the background.
+
+### Chrome / Chromium
+
+1. Go to the [latest release](https://github.com/o-i-z-y-s/hoverleser/releases/latest) and download `hoverleser-chrome-x.x.x.zip`
+2. Unzip it to a permanent folder on your computer
+3. Go to `chrome://extensions`, enable **Developer mode**, click **Load unpacked**, and select that folder
+4. The setup tab opens automatically. Import the dictionary before first use (see below)
+
+Chrome does not support automatic updates for sideloaded extensions. Check the releases page periodically for new versions.
 
 ---
 
@@ -42,18 +55,27 @@ Then drag the output file onto the import area.
 
 ## Development
 
-**Test locally (unsigned):**
+**Firefox (unsigned):**
 
 ```sh
 cd src && bash package.sh build
 # output: dist/hoverleser-x.x.x.xpi
 ```
 
-Load it in Firefox via `about:debugging` > Load Temporary Add-on.
+Load in Firefox via `about:debugging` > Load Temporary Add-on.
 
-**Release:** push to `main`. The `release.yml` workflow signs the XPI via AMO and attaches it to a GitHub Release automatically. No manual signing step is needed.
+**Chrome (unsigned):**
 
-**Bump the version** in `src/manifest.json` before every push. AMO rejects duplicate versions.
+```sh
+cd src && bash package.sh chrome
+# output: dist/hoverleser-chrome-x.x.x.zip
+```
+
+Unzip and load in Chrome via `chrome://extensions` > Load unpacked.
+
+**Release:** push to `main`. The `release.yml` workflow signs the Firefox XPI via AMO and builds the Chrome zip, attaching both to a GitHub Release automatically.
+
+**Bump the version** in both `src/manifest.json` and `src/manifest.chrome.json` before every push. AMO rejects duplicate versions.
 
 ---
 
@@ -61,7 +83,7 @@ Load it in Firefox via `about:debugging` > Load Temporary Add-on.
 
 | Workflow | Trigger | Output |
 |---|---|---|
-| **Build & Release** (`release.yml`) | Every push to `main` | Signed XPI attached to GitHub Release; `updates.json` updated so installed extensions auto-update |
+| **Build & Release** (`release.yml`) | Every push to `main` | Signed Firefox XPI + Chrome zip attached to GitHub Release; `updates.json` updated for Firefox auto-updates |
 | **Build Dictionary** (`dictionary.yml`) | Push touching build logic, 1st of month, or manual | `de-vX.Y.Z.jsonl.gz` and `.jsonl` attached to same Release |
 | **Submit to AMO Listed** (`amo-listed.yml`) | Manual only (type `SUBMIT` to confirm) | Submits for Mozilla public listing review |
 

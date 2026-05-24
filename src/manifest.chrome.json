@@ -1,0 +1,50 @@
+{
+  "manifest_version": 3,
+  "name": "Hoverleser",
+  "version": "1.0.6",
+  "description": "Hover over a German word to instantly see its translation, gender, pronunciation and grammar. Offline — no data sent anywhere.",
+
+  "permissions": [
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+
+  "background": {
+    "service_worker": "background.js"
+  },
+
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["lib/browser-polyfill.min.js", "content.js"],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ],
+
+  "action": {
+    "default_title": "Hoverleser",
+    "default_icon": {
+      "128": "icons/icon128.png"
+    },
+    "default_popup": "popup.html"
+  },
+
+  "icons": {
+    "128": "icons/icon128.png"
+  },
+
+  "web_accessible_resources": [
+    {
+      "resources": ["icons/icon128.png"],
+      "matches": ["<all_urls>"]
+    }
+  ],
+
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
+}
