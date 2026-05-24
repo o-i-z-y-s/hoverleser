@@ -10,7 +10,7 @@
  *   • Language-aware word boundary walk  → extract the word token
  *   • background.js owns the DB  → this script sends 'lookup' messages
  *   • Shadow DOM  → page CSS cannot affect the popup appearance
- *   • Progressive substring shortening handled by background.js
+ *   • Compound word splitting handled by background.js (German only)
  */
 
 (function () {
@@ -23,15 +23,15 @@
   // Each entry defines a regex that matches a single "word character" for
   // that language.  The content script uses the active language from settings.
   const LANG_CONFIGS = {
-    de: { name: 'German',  wordChar: /[A-Za-zÄÖÜäöüß\u00C0-\u024F]/ },
-    fr: { name: 'French',  wordChar: /[A-Za-zÀ-ÿœæŒÆ]/ },
-    es: { name: 'Spanish', wordChar: /[A-Za-zÁÉÍÓÚáéíóúñÑüÜ]/ },
-    nl: { name: 'Dutch',   wordChar: /[A-Za-zÀ-ÿ]/ },
-    it: { name: 'Italian', wordChar: /[A-Za-zÀ-ÿ]/ },
-    pt: { name: 'Portuguese', wordChar: /[A-Za-zÀ-ÿ]/ },
-    ru: { name: 'Russian', wordChar: /[\u0400-\u04FF]/ },
-    zh: { name: 'Chinese', wordChar: /[\u4E00-\u9FFF\u3400-\u4DBF]/ },
-    ja: { name: 'Japanese', wordChar: /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]/ },
+    de: { wordChar: /[A-Za-zÄÖÜäöüß\u00C0-\u024F]/ },
+    fr: { wordChar: /[A-Za-zÀ-ÿœæŒÆ]/ },
+    es: { wordChar: /[A-Za-zÁÉÍÓÚáéíóúñÑüÜ]/ },
+    nl: { wordChar: /[A-Za-zÀ-ÿ]/ },
+    it: { wordChar: /[A-Za-zÀ-ÿ]/ },
+    pt: { wordChar: /[A-Za-zÀ-ÿ]/ },
+    ru: { wordChar: /[\u0400-\u04FF]/ },
+    zh: { wordChar: /[\u4E00-\u9FFF\u3400-\u4DBF]/ },
+    ja: { wordChar: /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]/ },
   };
 
   // ── State ────────────────────────────────────────────────────────────────
@@ -137,7 +137,6 @@
       flex-shrink: 0; font-size: 10px; color: #666;
       margin-top: 3px; min-width: 14px; text-align: right;
     }
-    .hd-sense-body {}
     .hd-gloss {
       color: #a8d880;
       font-weight: 500;
@@ -179,16 +178,6 @@
       margin: 6px 0;
     }
 
-    /* ── Compound segment label ── */
-    .hd-compound-label {
-      padding: 2px 13px 0;
-      font-size: 10px;
-      color: #888;
-      font-weight: 600;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-    }
-
     /* ── Footer ── */
     .hd-foot {
       padding: 4px 13px 6px;
@@ -197,28 +186,6 @@
       border-top: 1px solid #2a2a2a;
     }
 
-    /* ── Loading state ── */
-    .hd-loading {
-      padding: 10px 13px;
-      color: #666;
-      font-size: 12px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .hd-spinner {
-      width: 11px; height: 11px;
-      border: 2px solid #333;
-      border-top-color: #888;
-      border-radius: 50%;
-      animation: hd-spin 0.7s linear infinite;
-    }
-    @keyframes hd-spin { to { transform: rotate(360deg); } }
-
-    /* ── Not found ── */
-    .hd-notfound { padding: 10px 13px; color: #ef4444; font-size: 12px; }
-
-    .hd-entries { }
   `;
 
   const styleEl = document.createElement('style');
@@ -264,6 +231,21 @@
       settings = msg.settings;
       if (!settings.enabled) clear();
     }
+  });
+
+  // Fast-path settings sync: react to storage writes directly so the update
+  // is visible before popup.js finishes its tab-query + broadcast loop.
+  // This closes the timing window where a mousemove between toggle-click and
+  // message delivery can show the popup for a shared EN/DE word (Motor, Job…).
+  browser.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local' || !changes.settings) return;
+    const next = Object.assign(
+      { enabled: false, langCode: 'de', showIpa: true,
+        showTags: true, showGender: true, maxSenses: 3 },
+      changes.settings.newValue ?? {}
+    );
+    settings = next;
+    if (!settings.enabled) clear();
   });
 
   // ── Word boundary detection ──────────────────────────────────────────────
@@ -340,7 +322,7 @@
   // ── Cache helpers ─────────────────────────────────────────────────────────
 
   function cacheGet(word, langCode) {
-    return resultCache.get(`${langCode}:${word}`) ?? undefined;
+    return resultCache.get(`${langCode}:${word}`);
   }
 
   function cacheSet(word, langCode, value) {
@@ -366,26 +348,6 @@
 
   const GENDER_LABELS = { m: 'der', f: 'die', n: 'das' };
   const GENDER_CLASS  = { m: 'hd-gender-m', f: 'hd-gender-f', n: 'hd-gender-n' };
-
-  function renderLoading(word) {
-    popup.innerHTML = `
-      <div class="hd-head">
-        <span class="hd-word">${esc(word)}</span>
-      </div>
-      <div class="hd-loading">
-        <span class="hd-spinner"></span>Looking up…
-      </div>`;
-    popup.style.display = 'block';
-  }
-
-  function renderNotFound(word) {
-    popup.innerHTML = `
-      <div class="hd-head">
-        <span class="hd-word">${esc(word)}</span>
-      </div>
-      <div class="hd-notfound">Not found in dictionary</div>`;
-    popup.style.display = 'block';
-  }
 
   // Canonical tag order for the unified tag row.
   // Earlier position = higher priority in display.
@@ -478,11 +440,7 @@
   }
 
   function renderResult(lookupResult) {
-    // Support both { segments } (compound) and legacy { matchedText, entries }
-    const segments = lookupResult.segments ?? [
-      { matchedText: lookupResult.matchedText, entries: lookupResult.entries }
-    ];
-
+    const { segments } = lookupResult;
     let html = '';
 
     segments.forEach((seg, si) => {
@@ -645,11 +603,7 @@
 
   document.addEventListener('mouseleave', clear);
 
-  document.addEventListener('scroll', () => {
-    popup.style.display    = 'none';
-    highlight.style.display = 'none';
-    currentWord = null;
-  }, { passive: true, capture: true });
+  document.addEventListener('scroll', () => { clear(); }, { passive: true, capture: true });
 
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') clear();

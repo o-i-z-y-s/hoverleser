@@ -5,23 +5,25 @@
  *   • Open and manage the IndexedDB dictionary database
  *   • Handle 'lookup' messages from content scripts → instant local DB query
  *   • Handle 'db-status' messages → report ready/loading/empty state
- *   • Handle 'import-start' → stream-import a compact dictionary JSONL file
+ *   • Handle 'import-file-start' / 'import-file-chunk' → stream-import a local JSONL file
  *   • Handle 'get-settings' / 'set-settings' → persist user preferences
  *
  * DB Schema (one DB per language, named "hoverleser-{langCode}"):
  *   Object store "entries":  keyPath="k" (lowercase lemma)
- *     { k, w, p, g, s, i }
- *       k  – lowercase lookup key   (string)
- *       w  – display word           (string, original casing)
- *       p  – part of speech         (string)
- *       g  – grammatical gender     (string|null, "m"/"f"/"n")
- *       s  – senses                 (Array<{gl:string[], t:string[]}>)
- *       i  – IPA pronunciation      (string|null)
+ *     { k, w, p, g, s, i, _extra? }
+ *       k       – lowercase lookup key   (string)
+ *       w       – display word           (string, original casing)
+ *       p       – part of speech         (string)
+ *       g       – grammatical gender     (string|null, "m"/"f"/"n")
+ *       s       – senses                 (Array<{gl:string[], t:string[]}>)
+ *       i       – IPA pronunciation      (string|null)
+ *       _extra  – additional POS blocks sharing the same key (e.g. Mensch noun
+ *                 + mensch pronoun); each element is {p,g,s,i} (optional)
  *
  *   Object store "forms":    keyPath="f" (lowercase inflected form)
  *     { f, l }
  *       f  – lowercase form         (string)
- *       l  – array of lowercase lemma keys it maps to  (string[])
+ *       l  – lemma records          ({k:string, t:string[]}[])
  *
  *   Object store "meta":     keyPath="k"
  *     { k: "info", lang, langCode, version, entryCount, formCount }
@@ -124,7 +126,7 @@ const RAW_SENSE_NOISE = new Set([
   'colloquial','slang','vulgar','offensive','pejorative','derogatory',
   'regional','dialectal','nonstandard','proscribed','uncommon',
 ]);
-const RAW_MAX_SENSES = 3;
+const RAW_MAX_SENSES = 5; // store more than the UI max (4) so users can change the setting without re-importing
 const RAW_MAX_FORMS  = 40;
 
 /**
@@ -263,36 +265,18 @@ async function importBatch(db, records) {
 // ── Lookup logic ───────────────────────────────────────────────────────────
 
 /**
- * Look up a word in the DB.
- *
- * Priority order — always biased toward the full word:
- *
- *   1. Exact entry match on full word (direct lemma key).
- *   2. Forms-index lookup on full word (inflected → lemma).
- *   3. Compound splitting — ONLY when:
- *        • prefix is ≥ 4 characters
- *        • suffix is ≥ 3 characters
- *        • suffix ALSO resolves in the dictionary
- *      Both halves must resolve for a split to be reported.
- *      If only the prefix matches but the suffix is unknown,
- *      the word is treated as not found rather than truncated.
- *
- * Returns null if nothing found, or:
- *   { segments: [{ matchedText, entries }] }
- */
-/**
  * Compound-context suffix lookup.
  * Prefers the direct DB entry over forms-index expansions so compound suffixes
  * like "Suche" don't also pull in the verb "suchen" (a cross-POS forms-index hit).
  * Falls back to full lookupWord when there is no direct entry (e.g. inflected suffix).
  */
-async function lookupWordAsSuffix(db, word) {
+async function lookupWordAsSuffix(db, word, langCode = 'de') {
   const wordLower = word.toLowerCase();
   // If there's a real direct entry with senses, show only that.
   const direct = await lookupDirectEntry(db, wordLower);
   if (direct) return { segments: [{ matchedText: word, entries: [direct] }] };
   // No direct entry — fall back to full lookup (handles inflected suffix forms).
-  return lookupWord(db, word);
+  return lookupWord(db, word, langCode);
 }
 
 /**
@@ -310,17 +294,39 @@ async function lookupDirectEntry(db, key) {
   return entry;
 }
 
-async function lookupWord(db, word) {
+/**
+ * Look up a word in the DB.
+ *
+ * Priority order — always biased toward the full word:
+ *
+ *   1. Exact entry match on full word (direct lemma key).
+ *   2. Forms-index lookup on full word (inflected → lemma).
+ *   3. Compound splitting (German only) — ONLY when:
+ *        • prefix is ≥ 4 characters
+ *        • suffix is ≥ 3 characters
+ *        • suffix ALSO resolves in the dictionary
+ *      Both halves must resolve for a split to be reported.
+ *      If only the prefix matches but the suffix is unknown,
+ *      the word is treated as not found rather than truncated.
+ *
+ * Returns null if nothing found, or:
+ *   { segments: [{ matchedText, entries }] }
+ */
+async function lookupWord(db, word, langCode = 'de') {
   const wordLower = word.toLowerCase();
 
   // Full-word lookup (uses forms-index + resolveFormOf for inflected forms)
-  const full = await lookupCandidate(db, wordLower, word);
+  const full = await lookupCandidate(db, wordLower, word, 0, langCode);
   if (full && full.length > 0) {
     return { segments: [{ matchedText: word, entries: full }] };
   }
 
-  // Compound splitting — prefix must be a DIRECT lemma entry to prevent
-  // false splits on inflected forms like "Wörter" (plural of Wort).
+  // Compound splitting — German only; other languages don't use the same
+  // closed-compound convention and Fugen-s stripping would be wrong for them.
+  if (langCode !== 'de') return null;
+
+  // Prefix must be a DIRECT lemma entry to prevent false splits on inflected
+  // forms like "Wörter" (plural of Wort).
   // Suffix uses full lookup so inflected suffixes (e.g. -er, -en) still work.
   const MIN_PREFIX = 4;
   const MIN_SUFFIX = 3;
@@ -343,7 +349,7 @@ async function lookupWord(db, word) {
     const prefRes = [prefEntry];
 
     const suffixWord = word.slice(len);
-    const suffixSeg  = await lookupWordAsSuffix(db, suffixWord);
+    const suffixSeg  = await lookupWordAsSuffix(db, suffixWord, langCode);
     if (!suffixSeg) continue;
 
     return {
@@ -379,21 +385,6 @@ function entryIsAllFormOf(entry) {
   });
 }
 
-/**
- * Look up a (lowercase) candidate word.
- * originalWord preserves the hover casing (e.g. 'Fragen') so forms-index
- * entries can be annotated with the correct display word and gramTags.
- *
- * Forms-index entries use {k, t} objects where t = grammatical tag list.
- * When a forms-index entry is a different POS than the direct entry (or no
- * direct entry exists), we annotate it as:
- *   { ...lemmaEntry, w: originalWord, gramTags: t }
- * so the UI shows the correct surface word with its grammatical role badged.
- *
- * Same-POS forms-index entries are excluded to avoid Trainer→Trainerin noise.
- * Exception: if the direct entry is itself all-form-of, all forms-index entries
- * are included to help base-lemma resolution in resolveFormOf.
- */
 /**
  * German morphological fallback.
  * When the forms index has no entry for a word, try common inflectional and
@@ -475,7 +466,22 @@ function germanDeinflect(word) {
   return out;
 }
 
-async function lookupCandidate(db, candidate, originalWord, _depth = 0) {
+/**
+ * Look up a (lowercase) candidate word.
+ * originalWord preserves the hover casing (e.g. 'Fragen') so forms-index
+ * entries can be annotated with the correct display word and gramTags.
+ *
+ * Forms-index entries use {k, t} objects where t = grammatical tag list.
+ * When a forms-index entry is a different POS than the direct entry (or no
+ * direct entry exists), we annotate it as:
+ *   { ...lemmaEntry, gramTags: t }
+ * so the UI shows the lemma word with its grammatical role badged.
+ *
+ * Same-POS forms-index entries are excluded to avoid Trainer→Trainerin noise.
+ * Exception: if the direct entry is itself all-form-of, all forms-index entries
+ * are included to help base-lemma resolution in resolveFormOf.
+ */
+async function lookupCandidate(db, candidate, originalWord, _depth = 0, langCode = 'de') {
   const directRaw = await idbGet(db, 'entries', candidate);
   // Expand _extra POS blocks into virtual sibling entries (e.g. Mensch noun + mensch pronoun).
   // Each sibling shares k and w with the primary entry but has its own p/g/s/i.
@@ -485,7 +491,7 @@ async function lookupCandidate(db, candidate, originalWord, _depth = 0) {
       }))]
     : [];
   // The "direct" variable used by the rest of the function is the primary entry.
-  const direct = directRaw ?? null;
+  const direct = directRaw;
 
   const formRec     = await idbGet(db, 'forms', candidate);
   const rawLemmas   = formRec?.l ?? [];
@@ -548,12 +554,12 @@ async function lookupCandidate(db, candidate, originalWord, _depth = 0) {
   }
 
   if (collected.length === 0) {
-    // Morphological fallback — try common German inflectional/derivational reductions.
-    // Guard with _depth so we never recurse more than one level.
-    if (_depth === 0) {
+    // Morphological fallback — German only; guard with _depth so we never
+    // recurse more than one level.
+    if (_depth === 0 && langCode === 'de') {
       const stems = germanDeinflect(candidate);
       for (const stem of stems) {
-        const r = await lookupCandidate(db, stem, originalWord, 1);
+        const r = await lookupCandidate(db, stem, originalWord, 1, langCode);
         if (r && r.length > 0) return r;
       }
     }
@@ -643,14 +649,15 @@ async function resolveFormOf(db, entries) {
         const dbEntry = await idbGet(db, 'entries', key);
         if (dbEntry && !entryIsAllFormOf(dbEntry)) baseEntry = dbEntry;
       }
-      // 3. Forms index fallback
-      if (!baseEntry) {
+      // 3. Forms index fallback — runs if no baseEntry yet, OR if step 2 found one
+      //    with zero senses (step 3 was skipped but the gap still needs filling).
+      if (!baseEntry || (baseEntry.s ?? []).length === 0) {
         const bf = await idbGet(db, 'forms', key);
         const firstLemma = bf?.l?.[0];
         const lemmaKey   = typeof firstLemma === 'string' ? firstLemma : firstLemma?.k;
         if (lemmaKey) {
           const fe = await idbGet(db, 'entries', lemmaKey);
-          if (fe && !entryIsAllFormOf(fe)) baseEntry = fe;
+          if (fe && !entryIsAllFormOf(fe) && (fe.s ?? []).length > 0) baseEntry = fe;
         }
       }
     }
@@ -663,32 +670,13 @@ async function resolveFormOf(db, entries) {
       if (!byKey.has(baseEntry.k) || entryIsAllFormOf(byKey.get(baseEntry.k))) {
         out.push({ ...baseEntry });
       }
-    } else {
-      // Fallback: base not found, or base is itself a form-of (chained / stale DB).
-      // Try one extra resolution level via the forms index of the base key.
-      let chainEntry = null;
-      if (baseWord) {
-        const baseKey2 = baseWord.toLowerCase().normalize('NFC').replace(/[[\]#|]/g, '').trim();
-        const bf = await idbGet(db, 'forms', baseKey2);
-        const firstLemma = bf?.l?.[0];
-        const lemmaKey   = typeof firstLemma === 'string' ? firstLemma : firstLemma?.k;
-        if (lemmaKey) {
-          const fe = await idbGet(db, 'entries', lemmaKey);
-          if (fe && !entryIsAllFormOf(fe) && (fe.s ?? []).length > 0) chainEntry = fe;
-        }
-      }
-      if (chainEntry) {
-        out.push({ ...chainEntry, w: entry.w, gramTags });
-      } else {
-        // Nothing resolvable — silently drop this entry; the dedup filter will
-        // discard it, and the deinflect fallback in lookupCandidate may still find something.
-        // (Don't push an empty-senses entry — it just shows an unusable popup.)
-      }
     }
+    // else: nothing resolvable → silently drop; the deinflect fallback in
+    // lookupCandidate may still surface something, and an empty-senses
+    // entry would only produce an unusable popup.
   }
   return out;
 }
-
 
 // ── Metadata helpers ───────────────────────────────────────────────────────
 
@@ -729,7 +717,7 @@ function defaultSettings() {
 // Tracks in-progress import so popup can poll progress.
 
 let importState = {
-  status:  'idle',   // 'idle' | 'running' | 'done' | 'error'
+  status:  'idle',   // 'idle' | 'downloading' | 'running' | 'done' | 'error'
   lang:    null,
   total:   0,
   done:    0,
@@ -744,7 +732,7 @@ browser.runtime.onMessage.addListener((msg, _sender) => {
     // ── Word lookup ──────────────────────────────────────────────────────
     case 'lookup': {
       const { word, langCode } = msg;
-      return openDb(langCode).then(db => lookupWord(db, word));
+      return openDb(langCode).then(db => lookupWord(db, word, langCode));
     }
 
     // ── DB status ────────────────────────────────────────────────────────
@@ -778,10 +766,6 @@ browser.runtime.onMessage.addListener((msg, _sender) => {
         return Promise.reject(new Error(`Fetch refused: only https://kaikki.org is permitted (got ${parsed.protocol}//${parsed.hostname})`));
       }
       return startImportFromUrl(url, langCode, lang).then(() => ({ ok: true }));
-    }
-
-    case 'import-status': {
-      return Promise.resolve(importState);
     }
 
     // ── Clear / reset DB ─────────────────────────────────────────────────
@@ -822,7 +806,7 @@ async function startImportFromUrl(url, langCode, lang) {
   // German kaikki has ~1.3 M entries; other languages vary but this is harmless.
   importState = { status: 'downloading', lang: langCode, total: 1350000, done: 0, error: null };
 
-  // Run async, don't await (fire-and-forget; popup polls import-status)
+  // Run async, don't await (fire-and-forget; popup polls db-status)
   runImport(url, langCode, lang).catch(err => {
     importState.status = 'error';
     importState.error  = err.message;
@@ -862,17 +846,19 @@ async function runImport(url, langCode, lang) {
   let   meta    = null;
   // Dedup: prefer real-definition entries over kaikki's standalone form-of entries.
   // Without this, a form-of "Fragen" entry can overwrite the verb "fragen".
-  const streamSeen      = new Set();   // all seen keys
-  const streamFormOfSet = new Set();   // keys whose current stored entry is form-of
-  const streamPosSeen   = new Map();   // key → pos of the stored non-form-of entry
-  const extraQueue      = [];          // {k, p, g, s, i} to merge as _extra later
+  const streamState = {
+    seen: new Set(), formOfSet: new Set(), posSeen: new Map(), extraQueue: [],
+  };
 
   const flush = async () => {
     if (batch.length === 0) return;
-    const counts = await importBatch(db, batch);
-    entryCount += counts.entryCount;
-    formCount  += counts.formCount;
-    importState.done = entryCount;
+    const deduped = dedupeStreamBatch(batch, streamState);
+    if (deduped.length > 0) {
+      const counts = await importBatch(db, deduped);
+      entryCount += counts.entryCount;
+      formCount  += counts.formCount;
+      importState.done = entryCount;
+    }
     batch = [];
   };
 
@@ -902,35 +888,6 @@ async function runImport(url, langCode, lang) {
 
       const entry = obj.k ? obj : processRawEntry(obj);
       if (!entry) continue;
-
-      // Dedup: detect whether this entry is all form-of
-      const entryIsFormOfHere = (entry.s ?? []).length > 0 && (entry.s ?? []).every(s =>
-        (s.gl ?? []).some(g => FORM_OF_RE.test(g.trim()))
-      );
-
-      if (streamSeen.has(entry.k)) {
-        if (!entryIsFormOfHere && streamFormOfSet.has(entry.k)) {
-          // Upgrade: replace the stored form-of entry with this real one.
-          streamFormOfSet.delete(entry.k);
-          if (entry.p) streamPosSeen.set(entry.k, entry.p);
-          // fall through to push
-        } else if (!entryIsFormOfHere && !streamFormOfSet.has(entry.k)) {
-          // Two real (non-form-of) entries share the same key.
-          const prevPos = streamPosSeen.get(entry.k);
-          if (prevPos && entry.p && entry.p !== prevPos) {
-            // Different POS (e.g. Mensch noun vs mensch pronoun) — queue for _extra merge.
-            extraQueue.push({ k: entry.k, p: entry.p, g: entry.g, s: entry.s, i: entry.i });
-          }
-          continue; // don't re-push main batch entry
-        } else {
-          continue; // new entry is form-of or same POS duplicate — skip
-        }
-      } else {
-        streamSeen.add(entry.k);
-        if (entryIsFormOfHere) streamFormOfSet.add(entry.k);
-        else if (entry.p) streamPosSeen.set(entry.k, entry.p);
-      }
-
       batch.push(entry);
       if (batch.length >= BATCH_SIZE) await flush();
     }
@@ -938,26 +895,8 @@ async function runImport(url, langCode, lang) {
 
   await flush();
 
-  // Merge _extra POS blocks into already-stored entries.
-  // These are real-definition entries that share a key with the primary entry
-  // but have a different POS (e.g. Mensch noun + mensch pronoun).
-  if (extraQueue.length > 0) {
-    try {
-      const exDb = await openDb(langCode);
-      for (const extra of extraQueue) {
-        const existing = await idbGet(exDb, 'entries', extra.k);
-        if (!existing) continue;
-        const extras = existing._extra ?? [];
-        if (!extras.some(e => e.p === extra.p)) {
-          extras.push({ p: extra.p, g: extra.g ?? null, s: extra.s, i: extra.i ?? null });
-          existing._extra = extras;
-          await idbPut(exDb, 'entries', existing);
-        }
-      }
-    } catch (err) {
-      console.warn('hoverleser: _extra merge failed:', err);
-    }
-  }
+  // Merge _extra POS blocks (e.g. Mensch noun + mensch pronoun).
+  await mergeExtraQueue(db, streamState.extraQueue);
 
   await setDbMeta(db, {
     lang, langCode,
@@ -993,18 +932,21 @@ browser.runtime.onInstalled.addListener(async ({ reason }) => {
 getSettings().then(s => openDb(s.langCode)).catch(() => {});
 
 // ── File import (chunked from popup) ──────────────────────────────────────
-// The popup reads a local .jsonl file in 4 MB slices and sends them here.
-// We reassemble via a line buffer and process identically to a URL import.
+// The popup streams a local .jsonl/.jsonl.gz file, parses it into entry objects,
+// and sends them here in batches. Dedup and DB writes mirror the URL import path.
 
 let fileImportState = {
-  langCode: null,
-  lang:     null,
-  db:       null,
-  buffer:   '',
-  batch:    [],
+  langCode:   null,
+  lang:       null,
+  db:         null,
   entryCount: 0,
   formCount:  0,
-  meta:     null,
+  meta:       null,
+  // cross-chunk dedup state (mirrors runImport stream dedup)
+  seen:       new Set(),
+  formOfSet:  new Set(),
+  posSeen:    new Map(),
+  extraQueue: [],
 };
 
 async function startImportFromFileStream(langCode, lang, totalEntries) {
@@ -1017,26 +959,101 @@ async function startImportFromFileStream(langCode, lang, totalEntries) {
 
   fileImportState = {
     langCode, lang, db,
-    buffer: '', batch: [],
     entryCount: 0, formCount: 0, meta: null,
+    seen: new Set(), formOfSet: new Set(), posSeen: new Map(), extraQueue: [],
   };
 
   importState = { status: 'running', lang: langCode, total: totalEntries, done: 0, error: null };
 }
 
+/**
+ * Merge queued _extra POS blocks into already-stored entries.
+ * Called at the end of both URL and file import paths.
+ */
+async function mergeExtraQueue(db, extraQueue) {
+  if (extraQueue.length === 0) return;
+  try {
+    for (const extra of extraQueue) {
+      const existing = await idbGet(db, 'entries', extra.k);
+      if (!existing) continue;
+      const extras = existing._extra ?? [];
+      if (!extras.some(e => e.p === extra.p)) {
+        extras.push({ p: extra.p, g: extra.g ?? null, s: extra.s, i: extra.i ?? null });
+        existing._extra = extras;
+        await idbPut(db, 'entries', existing);
+      }
+    }
+  } catch (err) {
+    console.warn('hoverleser: _extra merge failed:', err);
+  }
+}
+
+/**
+ * Shared stream-dedup helper used by both the file and URL import paths.
+ * Mutates state in-place; returns a filtered array ready for importBatch.
+ *
+ * Rules (same as runImport inline logic):
+ *   • First occurrence of a key wins.
+ *   • If the first was form-of and a real-definition entry arrives later, upgrade.
+ *   • Two real entries with different POS → queue as _extra.
+ *   • Duplicate key + same POS → skip.
+ */
+function dedupeStreamBatch(records, state) {
+  const { seen, formOfSet, posSeen, extraQueue } = state;
+  const filtered = [];
+
+  for (const rec of records) {
+    const entry = rec.k ? rec : processRawEntry(rec);
+    if (!entry) continue;
+
+    const entryIsFormOf = (entry.s ?? []).length > 0 && (entry.s ?? []).every(s =>
+      (s.gl ?? []).some(g => FORM_OF_RE.test(g.trim()))
+    );
+
+    if (seen.has(entry.k)) {
+      if (!entryIsFormOf && formOfSet.has(entry.k)) {
+        // Upgrade: a real-definition entry supersedes the stored form-of entry.
+        formOfSet.delete(entry.k);
+        if (entry.p) posSeen.set(entry.k, entry.p);
+        // fall through — include this entry
+      } else if (!entryIsFormOf && !formOfSet.has(entry.k)) {
+        // Two real entries share the same key.
+        const prevPos = posSeen.get(entry.k);
+        if (prevPos && entry.p && entry.p !== prevPos) {
+          // Different POS (e.g. Mensch noun vs mensch pronoun) → _extra merge later.
+          extraQueue.push({ k: entry.k, p: entry.p, g: entry.g ?? null, s: entry.s, i: entry.i ?? null });
+        }
+        continue; // don't re-push to batch
+      } else {
+        continue; // form-of duplicate or same-POS duplicate → skip
+      }
+    } else {
+      seen.add(entry.k);
+      if (entryIsFormOf) formOfSet.add(entry.k);
+      else if (entry.p) posSeen.set(entry.k, entry.p);
+    }
+
+    filtered.push(entry);
+  }
+  return filtered;
+}
+
 // Receives batches of already-parsed entry objects from popup.js.
 // 'data' is an array of entry objects; 'meta' is the metadata object (on last chunk).
 async function receiveFileChunk(langCode, data, metaObj, isLast) {
-  if (!Array.isArray(data) || data.length === 0) {
-    if (!isLast) return;
-  } else {
-    const counts = await importBatch(fileImportState.db, data);
-    fileImportState.entryCount += counts.entryCount;
-    fileImportState.formCount  += counts.formCount;
-    importState.done = fileImportState.entryCount;
+  if (Array.isArray(data) && data.length > 0) {
+    const filtered = dedupeStreamBatch(data, fileImportState);
+    if (filtered.length > 0) {
+      const counts = await importBatch(fileImportState.db, filtered);
+      fileImportState.entryCount += counts.entryCount;
+      fileImportState.formCount  += counts.formCount;
+      importState.done = fileImportState.entryCount;
+    }
   }
 
   if (isLast) {
+    await mergeExtraQueue(fileImportState.db, fileImportState.extraQueue);
+
     const m = metaObj ?? fileImportState.meta;
     await setDbMeta(fileImportState.db, {
       lang:       fileImportState.lang,

@@ -40,7 +40,7 @@ Then drag the output file onto the import area.
 
 ## Development
 
-**Build an unsigned XPI:**
+**Test locally (unsigned):**
 
 ```sh
 cd src && bash package.sh build
@@ -49,14 +49,7 @@ cd src && bash package.sh build
 
 Load it in Firefox via `about:debugging` > Load Temporary Add-on.
 
-**Sign for distribution (unlisted):**
-
-```sh
-cd src
-AMO_API_KEY=user:… AMO_API_SECRET=… bash package.sh sign
-```
-
-Get API credentials at [addons.mozilla.org/developers/addon/api/key/](https://addons.mozilla.org/developers/addon/api/key/).
+**Release:** push to `main`. The `release.yml` workflow signs the XPI via AMO and attaches it to a GitHub Release automatically. No manual signing step is needed.
 
 **Bump the version** in `src/manifest.json` before every push. AMO rejects duplicate versions.
 

@@ -33,7 +33,7 @@ const btnClear      = document.getElementById('btn-clear');
 const importMsg     = document.getElementById('import-msg');
 const btnOpenTab    = document.getElementById('btn-open-tab');
 
-let settings = { enabled: true, langCode: LANG_CODE, showIpa: true, showTags: true, showGender: true, maxSenses: 3 };
+let settings = { enabled: false, langCode: LANG_CODE, showIpa: true, showTags: true, showGender: true, maxSenses: 3 };
 let pollTimer = null;
 
 // ── Init ──────────────────────────────────────────────────────────────────
@@ -148,7 +148,7 @@ async function startKaikkiImport() {
       langCode: LANG_CODE,
       lang:     LANG_NAME,
     });
-        pollTimer = setTimeout(refreshDbStatus, 800);
+    pollTimer = setTimeout(refreshDbStatus, 800);
   } catch (err) {
     setMsg(err.message, 'err');
     setButtons({ importDisabled: false, clearDisabled: true });
@@ -215,7 +215,7 @@ async function importFile(file) {
     let buffer = '';
     let meta   = null;
     let total  = 0;
-    while (!meta) {
+    while (true) {
       const { done, value } = await reader.read();
       if (value) buffer += value;
       const nl = buffer.indexOf('\n');
