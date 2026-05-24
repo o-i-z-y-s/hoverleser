@@ -74,6 +74,24 @@ Required repository secrets (`Settings > Secrets > Actions`):
 
 ---
 
+## Vendored dependency
+
+`src/lib/browser-polyfill.min.js` is the [webextension-polyfill](https://github.com/mozilla/webextension-polyfill) library by Mozilla (v0.12.0, MPL-2.0). It is committed directly to this repository rather than fetched at build time in order to eliminate npm supply-chain risk entirely. No network requests are made during the Firefox or Chrome build.
+
+**Verification.** The file was obtained from two independent CDN sources (cdnjs/Cloudflare and unpkg/npm) and accepted only when both produced identical SHA-256 digests.
+
+Verified SHA-256: `918ed891c0e7f9b58b39ac32c9c3133eb2a1fbaaa27f4aa7579ae55e7572cc21`
+
+To re-verify or re-acquire the file at any time, run from the repo root:
+
+```bat
+vendor-polyfill.bat
+```
+
+This downloads from both CDNs, computes SHA-256 via `certutil`, and saves the file only if both hashes agree. Requires `curl` (built into Windows 10+).
+
+---
+
 ## Data
 
 Dictionary data from [kaikki.org](https://kaikki.org) (Wiktionary, CC BY-SA 4.0)

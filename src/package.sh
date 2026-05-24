@@ -3,8 +3,11 @@
 # hoverleser – package.sh
 #
 # Commands:
-#   bash package.sh build            Build dist/hoverleser-<version>.xpi
-#                                    (unsigned, for Firefox Dev Edition / Nightly)
+#   bash package.sh build            Build dist/hoverleser-<version>.xpi (Firefox, unsigned)
+#
+#   bash package.sh chrome           Build dist/hoverleser-chrome-<version>.zip (Chrome/Chromium)
+#                                    Requires lib/browser-polyfill.min.js to be present (vendored).
+#                                    Upload the zip to the Chrome Web Store — no signing step.
 #
 #   bash package.sh sign             Sign via Mozilla's AMO API (unlisted channel)
 #                                    Produces a signed .xpi you can distribute to
@@ -47,7 +50,8 @@ cmd_build() {
     content.js \
     popup.html \
     popup.js \
-    icons/icon128.png
+    icons/icon128.png \
+    lib/browser-polyfill.min.js
 
   local size
   size=$(du -h "$XPI_UNSIGNED" | cut -f1)
@@ -133,14 +137,51 @@ cmd_sign() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+cmd_build_chrome() {
+  # The polyfill is vendored in src/lib/ — no network fetch ever happens.
+  # See README.md "Vendored dependency" for verification instructions.
+  local POLYFILL="lib/browser-polyfill.min.js"
+  if [[ ! -f "$POLYFILL" ]]; then
+    echo "Error: $POLYFILL not found."
+    echo "See README.md (Vendored dependency section) for how to obtain and verify it."
+    exit 1
+  fi
+
+  local STAGE="$SCRIPT_DIR/$OUT_DIR/.chrome-stage"
+  local ZIP="$SCRIPT_DIR/$OUT_DIR/hoverleser-chrome-$VERSION.zip"
+  rm -rf "$STAGE" "$ZIP"
+  mkdir -p "$STAGE/icons" "$STAGE/lib"
+
+  echo "Building hoverleser Chrome v$VERSION..."
+
+  cp manifest.chrome.json   "$STAGE/manifest.json"
+  cp background.js content.js popup.html popup.js "$STAGE/"
+  cp icons/icon128.png      "$STAGE/icons/"
+  cp lib/browser-polyfill.min.js "$STAGE/lib/"
+
+  (cd "$STAGE" && zip -qr "$ZIP" .)
+  rm -rf "$STAGE"
+
+  local size
+  size=$(du -h "$ZIP" | cut -f1)
+  echo ""
+  echo "  ✓  $ZIP  ($size)  [unsigned — submit to Chrome Web Store]"
+  echo ""
+  echo "  Upload at: https://chrome.google.com/webstore/devconsole"
+  echo ""
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
 cmd_help() {
   grep '^#' "$0" | grep -v '^#!/' | sed 's/^# \{0,1\}//'
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
 case "${1:-build}" in
-  build) cmd_build ;;
-  sign)  cmd_sign  ;;
+  build)  cmd_build ;;
+  chrome) cmd_build_chrome ;;
+  sign)   cmd_sign  ;;
   help|--help|-h) cmd_help ;;
-  *) echo "Unknown command: $1  (try: build, sign, help)"; exit 1 ;;
+  *) echo "Unknown command: $1  (try: build, chrome, sign, help)"; exit 1 ;;
 esac

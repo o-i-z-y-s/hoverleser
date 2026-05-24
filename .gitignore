@@ -16,3 +16,5 @@ docs/
 # Editor
 .vscode/
 *.swp
+
+# (src/lib/ is intentionally committed — see README.md "Vendored dependency" section)
