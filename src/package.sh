@@ -75,6 +75,7 @@ cmd_sign() {
     --api-secret "$AMO_API_SECRET" \
     --ignore-files \
       "package.sh" "package.bat" "package.json" "package-lock.json" \
+      "manifest.chrome.json" \
       "node_modules/**" "dist/**" "scripts/**" "README.md" ".git/**"
 
   # web-ext names the output after the extension ID; rename to our convention
@@ -112,7 +113,7 @@ cmd_build_chrome() {
 
   cp manifest.chrome.json        "$STAGE/manifest.json"
   cp background.js content.js popup.html popup.js "$STAGE/"
-  cp icons/icon128.png           "$STAGE/icons/"
+  cp icons/icon16.png icons/icon32.png icons/icon48.png icons/icon96.png icons/icon128.png "$STAGE/icons/"
   cp lib/browser-polyfill.min.js "$STAGE/lib/"
 
   (cd "$STAGE" && zip -qr "$ZIP" .)

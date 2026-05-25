@@ -40,7 +40,7 @@
   let hoverTimer  = null;
   let lastX = 0, lastY = 0;
 
-  // Simple LRU cache so we don't hit the background for the same word twice
+  // Simple FIFO cache so we don't hit the background for the same word twice
   const CACHE_LIMIT = 300;
   const resultCache = new Map();
 

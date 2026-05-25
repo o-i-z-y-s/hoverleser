@@ -9,16 +9,16 @@ with Argos Translate (offline, no API keys required).
 
 Usage:
     python scripts/supplement.py \
-        --primary   dist/de-en.jsonl \
+        --primary    dist/de-en.jsonl \
         --supplement dist/de-de.jsonl \
-        --out       dist/de-extended.jsonl
+        --out        dist/de-extended.jsonl
 
 Options:
     --primary     <file>   Processed JSONL from en.wiktionary (English glosses)
     --supplement  <file>   Processed JSONL from de.wiktionary (German glosses)
     --out         <file>   Output path for the merged extended JSONL
     --progress    <n>      Print progress every N glosses (default: 64)
-    --no-translate         Skip MT; keep German glosses as-is (for testing)
+    --no-translate         Skip MT; keep German glosses as-is
     --cache-file  <file>   Persistent JSON cache for (de->en) gloss pairs
 
 Gap entries' inflected forms ("f" field) are preserved in the output and
@@ -26,6 +26,7 @@ will be indexed into the forms store on import, making their inflections
 searchable just like primary entries.
 
 Gap entries are marked with "mt": true (currently ignored by the renderer).
+Glosses that fail to translate are kept in German rather than aborting.
 
 Requirements:
     pip install "argostranslate>=1.9,<3"
@@ -97,7 +98,8 @@ def ensure_argos_package(src_lang='de', tgt_lang='en'):
         None,
     )
     if target is None:
-        print(f'ERROR: No argostranslate package found for {src_lang}->{tgt_lang}', file=sys.stderr)
+        print(f'ERROR: No argostranslate package found for {src_lang}->{tgt_lang}',
+              file=sys.stderr)
         sys.exit(1)
     pkg.install_from_path(target.download())
     print('[argos] Package installed.')
@@ -122,7 +124,7 @@ def translate_glosses(entries, translator, cache_file=None, progress_interval=64
 
     Two layers of efficiency:
       1. Persistent cache: a JSON file stores (German -> English) pairs across
-         CI runs.  Glosses seen in a previous run are never re-translated.
+         runs.  Glosses seen in a previous run are never re-translated.
       2. In-run dedup: identical strings within this run are translated once
          and the result reused for every duplicate slot.
 
@@ -246,8 +248,7 @@ def main():
         out_meta = {'type': 'meta', 'lang': 'German', 'langCode': 'de'}
 
     out_meta['entryCount'] = total_entries
-    if 'formCount' in out_meta:
-        out_meta['formCount'] = out_meta['formCount'] + gap_form_count
+    out_meta['formCount'] = out_meta.get('formCount', 0) + gap_form_count
 
     out_dir = os.path.dirname(args.out)
     if out_dir:

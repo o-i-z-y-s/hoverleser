@@ -36,13 +36,6 @@
 // the same browser.* API as the Firefox build.
 if (typeof browser === 'undefined') importScripts('lib/browser-polyfill.min.js');
 
-// True when running as a Chrome MV3 service worker, false in a Firefox MV2
-// background page. Used to enable service-worker-specific behaviour.
-const IS_SERVICE_WORKER = (
-  typeof ServiceWorkerGlobalScope !== 'undefined' &&
-  self instanceof ServiceWorkerGlobalScope
-);
-
 // ── DB registry: langCode → IDBDatabase ───────────────────────────────────
 const openDbs = new Map();
 const DB_VERSION = 1;
@@ -328,7 +321,7 @@ async function lookupWord(db, word, langCode = 'de') {
   const wordLower = word.toLowerCase();
 
   // Full-word lookup (uses forms-index + resolveFormOf for inflected forms)
-  const full = await lookupCandidate(db, wordLower, word, 0, langCode);
+  const full = await lookupCandidate(db, wordLower, 0, langCode);
   if (full && full.length > 0) {
     return { segments: [{ matchedText: word, entries: full }] };
   }
@@ -503,8 +496,7 @@ function germanDeinflect(word) {
 
 /**
  * Look up a (lowercase) candidate word.
- * originalWord preserves the hover casing (e.g. 'Fragen') so forms-index
- * entries can be annotated with the correct display word and gramTags.
+ * Forms-index entries are annotated with gramTags for grammatical relationship display.
  *
  * Forms-index entries use {k, t} objects where t = grammatical tag list.
  * When a forms-index entry is a different POS than the direct entry (or no
@@ -516,7 +508,7 @@ function germanDeinflect(word) {
  * Exception: if the direct entry is itself all-form-of, all forms-index entries
  * are included to help base-lemma resolution in resolveFormOf.
  */
-async function lookupCandidate(db, candidate, originalWord, _depth = 0, langCode = 'de') {
+async function lookupCandidate(db, candidate, _depth = 0, langCode = 'de') {
   const directRaw = await idbGet(db, 'entries', candidate);
   // Expand _extra POS blocks into virtual sibling entries (e.g. Mensch noun + mensch pronoun).
   // Each sibling shares k and w with the primary entry but has its own p/g/s/i.
@@ -607,7 +599,7 @@ async function lookupCandidate(db, candidate, originalWord, _depth = 0, langCode
     if (_depth === 0 && langCode === 'de') {
       const stems = germanDeinflect(candidate);
       for (const stem of stems) {
-        const r = await lookupCandidate(db, stem, originalWord, 1, langCode);
+        const r = await lookupCandidate(db, stem, 1, langCode);
         if (r && r.length > 0) return r;
       }
     }
@@ -820,7 +812,7 @@ browser.runtime.onMessage.addListener((msg, sender) => {
       const raw = msg.settings ?? {};
       const safe = {
         enabled:    typeof raw.enabled    === 'boolean' ? raw.enabled    : false,
-        langCode:   typeof raw.langCode   === 'string'  ? raw.langCode.slice(0, 8) : 'de',
+        langCode:   ['de','fr','es','nl','it','pt','ru','zh','ja'].includes(raw.langCode) ? raw.langCode : 'de',
         showIpa:    typeof raw.showIpa    === 'boolean' ? raw.showIpa    : true,
         showTags:   typeof raw.showTags   === 'boolean' ? raw.showTags   : true,
         showGender: typeof raw.showGender === 'boolean' ? raw.showGender : true,
@@ -831,20 +823,7 @@ browser.runtime.onMessage.addListener((msg, sender) => {
     }
 
     // ── Import dictionary from JSONL text ────────────────────────────────
-    // The popup sends chunks of the JSONL file one at a time, or the
-    // background can fetch a URL itself.
-    case 'import-url': {
-      const denied = extensionOnly();
-      if (denied) return denied;
-      const { url, langCode, lang } = msg;
-      // Only allow fetching from kaikki.org: prevent background fetch abuse
-      let parsed;
-      try { parsed = new URL(url); } catch { return Promise.reject(new Error('Invalid URL')); }
-      if (parsed.hostname !== 'kaikki.org' || parsed.protocol !== 'https:') {
-        return Promise.reject(new Error(`Fetch refused: only https://kaikki.org is permitted (got ${parsed.protocol}//${parsed.hostname})`));
-      }
-      return startImportFromUrl(url, langCode, lang).then(() => ({ ok: true }));
-    }
+    // The popup sends chunks of the JSONL file one at a time.
 
     // ── Clear / reset DB ─────────────────────────────────────────────────
     case 'clear-db': {
@@ -882,120 +861,6 @@ browser.runtime.onMessage.addListener((msg, sender) => {
   }
 });
 
-// ── Import from URL ────────────────────────────────────────────────────────
-
-async function startImportFromUrl(url, langCode, lang) {
-  if (importState.status === 'running') {
-    throw new Error('Import already in progress');
-  }
-
-  // Pre-set an approximate total so the progress bar is meaningful from the start.
-  // German kaikki has ~1.3 M entries; other languages vary but this is harmless.
-  importState = { status: 'downloading', lang: langCode, total: 1350000, done: 0, error: null };
-
-  // Run async, don't await (fire-and-forget; popup polls db-status)
-  runImport(url, langCode, lang).catch(err => {
-    importState.status = 'error';
-    importState.error  = err.message;
-    console.error('hoverleser import failed:', err);
-  });
-}
-
-async function runImport(url, langCode, lang) {
-  const db = await openDb(langCode);
-
-  // Clear existing data first
-  await idbClear(db, 'entries');
-  await idbClear(db, 'forms');
-  await idbClear(db, 'meta');
-
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`HTTP ${response.status} fetching ${url}`);
-
-  // Response received: switch from downloading to importing
-  importState.status = 'running';
-
-  // Only manually decompress if the URL explicitly ends in .gz (a pre-built file).
-  // fetch() already transparently decompresses Content-Encoding:gzip; checking
-  // that header and decompressing again would corrupt the stream.
-  let body = response.body;
-  const isGzip = url.endsWith('.gz');
-  if (isGzip && typeof DecompressionStream !== 'undefined') {
-    body = body.pipeThrough(new DecompressionStream('gzip'));
-  }
-
-  const reader  = body.getReader();
-  const decoder = new TextDecoder();
-  let   buffer  = '';
-  let   batch   = [];
-  let   entryCount = 0;
-  let   formCount  = 0;
-  let   meta    = null;
-  // Dedup: prefer real-definition entries over kaikki's standalone form-of entries.
-  // Without this, a form-of "Fragen" entry can overwrite the verb "fragen".
-  const streamState = {
-    seen: new Set(), formOfSet: new Set(), posSeen: new Map(), extraQueue: [],
-  };
-
-  const flush = async () => {
-    if (batch.length === 0) return;
-    const deduped = dedupeStreamBatch(batch, streamState);
-    if (deduped.length > 0) {
-      const counts = await importBatch(db, deduped);
-      entryCount += counts.entryCount;
-      formCount  += counts.formCount;
-      importState.done = entryCount;
-    }
-    batch = [];
-  };
-
-  // Stream the JSONL line-by-line
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-
-    let nl;
-    while ((nl = buffer.indexOf('\n')) !== -1) {
-      const line = buffer.slice(0, nl).trim();
-      buffer = buffer.slice(nl + 1);
-
-      if (!line) continue;
-      let obj;
-      try { obj = JSON.parse(line); } catch { continue; }
-
-      // Support both: pre-processed compact JSONL (from build-dict.js, has 'k')
-      // and raw kaikki.org JSONL (has 'word'). processRawEntry handles the latter.
-      if (obj.type === 'meta') {
-        meta = obj;
-        importState.total = obj.entryCount ?? 0;
-        continue;
-      }
-
-      const entry = obj.k ? obj : processRawEntry(obj);
-      if (!entry) continue;
-      batch.push(entry);
-      if (batch.length >= BATCH_SIZE) await flush();
-    }
-  }
-
-  await flush();
-
-  // Merge _extra POS blocks (e.g. Mensch noun + mensch pronoun).
-  await mergeExtraQueue(db, streamState.extraQueue);
-
-  await setDbMeta(db, {
-    lang, langCode,
-    version:    meta?.version    ?? 'unknown',
-    entryCount, formCount,
-    importedAt: Date.now(),
-  });
-
-  importState.status = 'done';
-  importState.done   = entryCount;
-}
-
 // ── Init ───────────────────────────────────────────────────────────────────
 
 browser.runtime.onInstalled.addListener(async ({ reason }) => {
@@ -1029,7 +894,7 @@ let fileImportState = {
   entryCount: 0,
   formCount:  0,
   meta:       null,
-  // cross-chunk dedup state (mirrors runImport stream dedup)
+  // cross-chunk dedup state
   seen:       new Set(),
   formOfSet:  new Set(),
   posSeen:    new Map(),
@@ -1076,10 +941,10 @@ async function mergeExtraQueue(db, extraQueue) {
 }
 
 /**
- * Shared stream-dedup helper used by both the file and URL import paths.
+ * Shared stream-dedup helper for the file import path.
  * Mutates state in-place; returns a filtered array ready for importBatch.
  *
- * Rules (same as runImport inline logic):
+ * Rules:
  *   • First occurrence of a key wins.
  *   • If the first was form-of and a real-definition entry arrives later, upgrade.
  *   • Two real entries with different POS → queue as _extra.

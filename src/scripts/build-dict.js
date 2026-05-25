@@ -250,7 +250,6 @@ function processEntry(raw, includeforms) {
       const form = (f.form ?? '').trim();
       // Skip template/placeholder forms
       if (!form || form.length > 60 || form.includes('-') && form.length < 3) continue;
-      if (/^[a-z][a-z-]+$/.test(form) && form.length < 5) continue; // template names
       const fl = form.toLowerCase();
       if (!seen.has(fl)) {
         seen.add(fl);
@@ -427,7 +426,6 @@ async function main() {
   console.log(`  Forms   : ${formCount.toLocaleString()}`);
   console.log(`  Skipped : ${skipped.toLocaleString()}`);
   console.log(`  Output  : ${opts.out} (${sizeKb.toLocaleString()} KB)`);
-  const compressNote = opts.compress ? ' (gzip compressed)' : '';
   console.log(`\nNext steps:`);
   console.log(`  Drag ${opts.out} onto the extension popup to import, or`);
   console.log(`  host it somewhere and click "Download & Import".\n`);

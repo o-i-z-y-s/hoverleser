@@ -8,7 +8,6 @@ name: Build Dictionary
     paths:
       - 'src/scripts/build-dict.js'
       - 'src/scripts/supplement.py'
-      - 'src/background.js'
   schedule:
     - cron: '0 3 1 * *'
   workflow_dispatch:
@@ -39,15 +38,6 @@ jobs:
           VERSION=$(node -p "require('./src/manifest.json').version")
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
 
-      - name: Cache Argos Translate language pack
-        uses: actions/cache@v4
-        with:
-          path: ~/.local/share/argos-translate
-          key: argos-de-en-v1
-
-      - name: Install argostranslate
-        run: pip install "argostranslate>=1.9,<3" --break-system-packages
-
       - name: Build dictionary from en.wiktionary (English glosses)
         working-directory: src
         run: |
@@ -66,22 +56,14 @@ jobs:
             --out  dist/de-de.jsonl
           echo "de.wiktionary entries: $(wc -l < dist/de-de.jsonl)"
 
-      - name: Cache translation pairs (de->en gloss cache)
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/hoverleser-trans/de-en.json
-          key: hoverleser-trans-de-en-${{ github.run_id }}
-          restore-keys: |
-            hoverleser-trans-de-en-
-
       - name: Merge and translate gap entries
         working-directory: src
         run: |
           python scripts/supplement.py \
-            --primary    dist/de-en.jsonl \
-            --supplement dist/de-de.jsonl \
-            --out        dist/de-extended.jsonl \
-            --cache-file ~/.cache/hoverleser-trans/de-en.json
+            --primary      dist/de-en.jsonl \
+            --supplement   dist/de-de.jsonl \
+            --out          dist/de-extended.jsonl \
+            --no-translate
           echo "Extended entries: $(wc -l < dist/de-extended.jsonl)"
 
       - name: Compress extended dictionary

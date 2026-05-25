@@ -3,11 +3,9 @@
  */
 'use strict';
 
-// Pre-built extended dictionary from GitHub Releases (~35 MB compressed).
-// Built by the dictionary.yml workflow: en.wiktionary + de.wiktionary gap
-// entries machine-translated to English with Argos Translate.
-// Stable URL via the dedicated dict-latest release tag.
-const DICT_RELEASE_URL = 'https://github.com/o-i-z-y-s/hoverleser/releases/download/dict-latest/de-latest.jsonl.gz';
+// Kaikki.org postprocessed JSONL for German (from English Wiktionary).
+// Streamed directly; no API key required.
+const KAIKKI_DE_URL = 'https://kaikki.org/dictionary/German/kaikki.org-dictionary-German.jsonl';
 const LANG_CODE = 'de';
 const LANG_NAME = 'German';
 
@@ -73,20 +71,11 @@ async function refreshDbStatus() {
   });
   clearTimeout(pollTimer);
 
-  if (importing && (importing.status === 'running' || importing.status === 'downloading')) {
-    const downloading = importing.status === 'downloading';
+  if (importing && importing.status === 'running') {
     const pct = importing.total > 0 ? Math.round(100 * importing.done / importing.total) : 0;
     statusDot.className        = 'dot dot-loading';
-    if (downloading && importing.done === 0) {
-      statusText.innerHTML     = 'Downloading…';
-      dbMeta.textContent       = 'Connecting to kaikki.org';
-    } else if (downloading) {
-      statusText.innerHTML     = `Downloading & importing… <em>${importing.done.toLocaleString()} entries</em>`;
-      dbMeta.textContent       = importing.total > 0 ? `${pct}% complete` : '';
-    } else {
-      statusText.innerHTML     = `Importing… <em>${importing.done.toLocaleString()} entries</em>`;
-      dbMeta.textContent       = importing.total > 0 ? `${pct}% complete` : '';
-    }
+    statusText.innerHTML       = `Importing… <em>${importing.done.toLocaleString()} entries</em>`;
+    dbMeta.textContent         = importing.total > 0 ? `${pct}% complete` : '';
     progressWrap.style.display = 'block';
     progressBar.style.width    = `${pct}%`;
     setButtons({ importDisabled: true, clearDisabled: true });
@@ -137,8 +126,8 @@ function setMsg(text, type) {
   importMsg.className   = type ? `msg msg-${type}` : 'msg';
 }
 
-// ── Download & import from GitHub Releases ────────────────────────────────
-async function startReleaseFetch() {
+// ── Download & import from kaikki.org ────────────────────────────────────
+async function startKaikkiImport() {
   setMsg('', '');
   setButtons({ importDisabled: true, clearDisabled: true });
   statusDot.className        = 'dot dot-loading';
@@ -147,7 +136,7 @@ async function startReleaseFetch() {
   progressBar.style.width    = '0%';
 
   try {
-    const resp = await fetch(DICT_RELEASE_URL);
+    const resp = await fetch(KAIKKI_DE_URL);
     if (!resp.ok) throw new Error(`Download failed: HTTP ${resp.status}`);
 
     const contentLength = resp.headers.get('content-length');
@@ -171,8 +160,8 @@ async function startReleaseFetch() {
       }
     }
 
-    const blob = new Blob(chunks, { type: 'application/gzip' });
-    const file = new File([blob], 'de-latest.jsonl.gz', { type: 'application/gzip' });
+    const blob = new Blob(chunks, { type: 'application/jsonl' });
+    const file = new File([blob], 'de.jsonl', { type: 'application/jsonl' });
     progressWrap.style.display = 'none';
     await importFile(file);
   } catch (err) {
@@ -190,7 +179,7 @@ btnImport.addEventListener('click', () => {
     browser.tabs.create({ url: browser.runtime.getURL('popup.html') + '?autoImport=1' });
     window.close();
   } else {
-    startReleaseFetch();
+    startKaikkiImport();
   }
 });
 
@@ -483,6 +472,6 @@ init().then(() => {
   initSamplePanel();
   // Auto-trigger release fetch if opened from the popup button in narrow mode
   if (new URLSearchParams(window.location.search).get('autoImport') === '1') {
-    startReleaseFetch();
+    startKaikkiImport();
   }
 }).catch(console.error);
