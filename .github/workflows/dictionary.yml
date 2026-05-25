@@ -62,7 +62,7 @@ jobs:
         run: |
           node scripts/build-dict.js \
             --code de \
-            --url  https://kaikki.org/dewiktionary/Deutsch/kaikki.org-dewiktionary-Deutsch.jsonl \
+            --url  https://kaikki.org/dewiktionary/Deutsch/kaikki.org-dictionary-Deutsch.jsonl \
             --out  dist/de-de.jsonl
           echo "de.wiktionary entries: $(wc -l < dist/de-de.jsonl)"
 
