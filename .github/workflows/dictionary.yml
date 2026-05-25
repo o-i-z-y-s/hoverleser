@@ -1,15 +1,11 @@
 # Hoverleser: Dictionary Build Workflow
+# Triggered manually only. Run this when you want to produce and publish
+# a new pre-built dictionary release (e.g. after a kaikki.org data refresh
+# or a build-dict.js logic change).
 
 name: Build Dictionary
 
 "on":
-  push:
-    branches: [main]
-    paths:
-      - 'src/scripts/build-dict.js'
-      - 'src/scripts/supplement.py'
-  schedule:
-    - cron: '0 3 1 * *'
   workflow_dispatch:
 
 jobs:
@@ -27,17 +23,6 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Read extension version
-        id: version
-        run: |
-          VERSION=$(node -p "require('./src/manifest.json').version")
-          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
-
       - name: Build dictionary from en.wiktionary (English glosses)
         working-directory: src
         run: |
@@ -47,40 +32,26 @@ jobs:
             --out  dist/de-en.jsonl
           echo "en.wiktionary entries: $(wc -l < dist/de-en.jsonl)"
 
-      - name: Build dictionary from de.wiktionary (German glosses)
+      - name: Compress dictionary
+        id: compress
         working-directory: src
         run: |
-          node scripts/build-dict.js \
-            --code de \
-            --url  https://kaikki.org/dewiktionary/Deutsch/kaikki.org-dictionary-Deutsch.jsonl \
-            --out  dist/de-de.jsonl
-          echo "de.wiktionary entries: $(wc -l < dist/de-de.jsonl)"
-
-      - name: Merge and translate gap entries
-        working-directory: src
-        run: |
-          python scripts/supplement.py \
-            --primary      dist/de-en.jsonl \
-            --supplement   dist/de-de.jsonl \
-            --out          dist/de-extended.jsonl \
-            --no-translate
-          echo "Extended entries: $(wc -l < dist/de-extended.jsonl)"
-
-      - name: Compress extended dictionary
-        working-directory: src
-        run: |
-          VFILE="dist/de-v${{ steps.version.outputs.VERSION }}.jsonl"
-          cp dist/de-extended.jsonl "$VFILE"
+          DICT_DATE=$(date +%Y-%m)
+          VFILE="dist/de-${DICT_DATE}.jsonl"
+          cp dist/de-en.jsonl "$VFILE"
           gzip -k "$VFILE"
           cp "${VFILE}.gz" dist/de-latest.jsonl.gz
-          ls -lh dist/de-v*.jsonl dist/de-v*.jsonl.gz dist/de-latest.jsonl.gz
+          echo "DICT_DATE=${DICT_DATE}" >> $GITHUB_OUTPUT
+          ls -lh dist/de-*.jsonl dist/de-*.jsonl.gz
 
-      - name: Upload versioned dictionary to version release
+      - name: Upload versioned dictionary to dated release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ steps.version.outputs.VERSION }}
+          tag_name: dict-${{ steps.compress.outputs.DICT_DATE }}
+          name: "Dictionary ${{ steps.compress.outputs.DICT_DATE }}"
+          body: "Pre-built German dictionary from en.wiktionary (${{ steps.compress.outputs.DICT_DATE }})."
           files: |
-            src/dist/de-v${{ steps.version.outputs.VERSION }}.jsonl.gz
+            src/dist/de-${{ steps.compress.outputs.DICT_DATE }}.jsonl.gz
           fail_on_unmatched_files: true
 
       - name: Force-update dict-latest tag
@@ -95,7 +66,7 @@ jobs:
         with:
           tag_name: dict-latest
           name: "Dictionary (latest)"
-          body: "Auto-updated extended German dictionary. Fetch via the extension's Download & Import button."
+          body: "Pre-built German dictionary from en.wiktionary. Fetch via the extension's Download & Import button."
           files: |
             src/dist/de-latest.jsonl.gz
           fail_on_unmatched_files: true
