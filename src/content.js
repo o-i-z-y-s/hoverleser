@@ -403,6 +403,16 @@
 
   function renderEntries(entries) {
     let html = '';
+    // Distribute sense budget across all POS entries in this segment.
+    // Each entry gets at least 1 sense; surplus goes to earlier entries.
+    // This prevents a word with many POS blocks (e.g. verb + pronoun) from
+    // exceeding the user-chosen maxSenses total.
+    const maxTotal = settings.maxSenses ?? 3;
+    const n      = entries.length;
+    const base   = Math.floor(maxTotal / n);
+    const extras = maxTotal % n;
+    const budgets = entries.map((_, i) => Math.max(1, base + (i < extras ? 1 : 0)));
+
     entries.forEach((entry, idx) => {
       if (idx > 0) html += '<hr class="hd-sep">';
 
@@ -422,7 +432,7 @@
       }
       if (Array.isArray(entry.s) && entry.s.length) {
         html += '<div class="hd-senses">';
-        const senses = entry.s.slice(0, settings.maxSenses ?? 3);
+        const senses = entry.s.slice(0, budgets[idx]);
         senses.forEach((sense, i) => {
           const gloss = Array.isArray(sense.gl) ? sense.gl.join('; ') : String(sense);
           html += `

@@ -151,7 +151,36 @@
       .sample-words     { display: flex; flex-wrap: wrap; gap: 5px; }
       .sample-word      { font-size: 14px; background: #202020; border: 1px solid #2a2a2a;
                           border-radius: 5px; padding: 3px 10px; color: #bbb;
-                          cursor: default; user-select: none; }
+                          cursor: pointer; user-select: none; transition: background .12s, color .12s; }
+      .sample-word:hover { background: #282828; color: #eee; border-color: #3a3a3a; }
+
+      /* Inline result card for sample panel hover */
+      .sample-result { background: #161616; border: 1px solid #2e2e2e; border-radius: 8px;
+                       margin-top: 10px; overflow: hidden; font-size: 13px; }
+      .sr-head  { padding: 8px 13px 6px; background: #131313; border-bottom: 1px solid #2a2a2a;
+                  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+      .sr-word  { font-size: 18px; font-weight: 700; color: #f0f0f0; }
+      .sr-pos   { font-size: 11px; color: #777; font-style: italic; }
+      .sr-gender { font-size: 11px; font-weight: 600; padding: 1px 5px; border-radius: 4px; }
+      .sr-gender-m { background:#1e2e3d; color:#82b4e0; }
+      .sr-gender-f { background:#3a1a28; color:#e8a0bc; }
+      .sr-gender-n { background:#1a2a1a; color:#88d8a0; }
+      .sr-ipa   { padding: 3px 13px 0; font-size: 11px; color: #777; font-family: monospace;
+                  border-bottom: 1px solid #242424; }
+      .sr-senses { padding: 5px 0 7px; }
+      .sr-sense  { display: flex; padding: 2px 13px; gap: 8px; }
+      .sr-sense-num { flex-shrink: 0; font-size: 10px; color: #666; margin-top: 3px;
+                      min-width: 14px; text-align: right; }
+      .sr-gloss { color: #a8d880; font-weight: 500; font-size: 13px; }
+      .sr-sep   { border: none; border-top: 1px solid #242424; margin: 3px 0; }
+      .sr-seg-sep { border: none; border-top: 2px solid #2e2e2e; margin: 4px 0; }
+      .sr-tags-row { display: flex; flex-wrap: wrap; gap: 3px; padding: 3px 13px 4px; }
+      .sr-gram-tag { display: inline-block; background: #242424; color: #888;
+                     border: 1px solid #363636; border-radius: 3px; font-size: 9px;
+                     font-weight: 600; padding: 2px 5px; letter-spacing: 0.04em;
+                     text-transform: uppercase; white-space: nowrap; }
+      .sr-miss { font-size: 12px; color: #666; padding: 8px 13px; display: block; font-style: italic; }
+      .sr-foot { padding: 3px 13px 5px; font-size: 10px; color: #555; border-top: 1px solid #242424; }
     }
 
     /* Tab overrides: must be LAST so they win over base styles */
@@ -355,6 +384,7 @@
       </div>
 
     </div>
+    <div class="sample-result" id="sample-result" style="display:none"></div>
   </details>
 
   <div class="footer">

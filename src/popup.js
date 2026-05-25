@@ -3,10 +3,11 @@
  */
 'use strict';
 
-// Direct kaikki.org German dictionary URL.
-// This is the raw Wiktionary JSONL (~300–400 MB uncompressed).
-// background.js processes it with processRawEntry() on the fly.
-const KAIKKI_DE_URL = 'https://kaikki.org/dictionary/German/kaikki.org-dictionary-German.jsonl';
+// Pre-built extended dictionary from GitHub Releases (~35 MB compressed).
+// Built by the dictionary.yml workflow: en.wiktionary + de.wiktionary gap
+// entries machine-translated to English with Argos Translate.
+// Stable URL via the dedicated dict-latest release tag.
+const DICT_RELEASE_URL = 'https://github.com/o-i-z-y-s/hoverleser/releases/download/dict-latest/de-latest.jsonl.gz';
 const LANG_CODE = 'de';
 const LANG_NAME = 'German';
 
@@ -136,22 +137,49 @@ function setMsg(text, type) {
   importMsg.className   = type ? `msg msg-${type}` : 'msg';
 }
 
-// ── Download & import from kaikki.org ─────────────────────────────────────
-async function startKaikkiImport() {
+// ── Download & import from GitHub Releases ────────────────────────────────
+async function startReleaseFetch() {
   setMsg('', '');
   setButtons({ importDisabled: true, clearDisabled: true });
-  
+  statusDot.className        = 'dot dot-loading';
+  statusText.innerHTML       = 'Downloading dictionary…';
+  progressWrap.style.display = 'block';
+  progressBar.style.width    = '0%';
+
   try {
-    await browser.runtime.sendMessage({
-      type: 'import-url',
-      url:      KAIKKI_DE_URL,
-      langCode: LANG_CODE,
-      lang:     LANG_NAME,
-    });
-    pollTimer = setTimeout(refreshDbStatus, 800);
+    const resp = await fetch(DICT_RELEASE_URL);
+    if (!resp.ok) throw new Error(`Download failed: HTTP ${resp.status}`);
+
+    const contentLength = resp.headers.get('content-length');
+    const total = contentLength ? parseInt(contentLength, 10) : 0;
+
+    const reader = resp.body.getReader();
+    const chunks = [];
+    let received = 0;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      received += value.length;
+      if (total > 0) {
+        const pct = Math.round(received / total * 100);
+        progressBar.style.width = pct + '%';
+        dbMeta.textContent      = `Downloading… ${pct}%`;
+      } else {
+        dbMeta.textContent = `Downloaded ${(received / 1048576).toFixed(1)} MB`;
+      }
+    }
+
+    const blob = new Blob(chunks, { type: 'application/gzip' });
+    const file = new File([blob], 'de-latest.jsonl.gz', { type: 'application/gzip' });
+    progressWrap.style.display = 'none';
+    await importFile(file);
   } catch (err) {
+    progressWrap.style.display = 'none';
     setMsg(err.message, 'err');
     setButtons({ importDisabled: false, clearDisabled: true });
+    await refreshDbStatus();
   }
 }
 
@@ -162,7 +190,7 @@ btnImport.addEventListener('click', () => {
     browser.tabs.create({ url: browser.runtime.getURL('popup.html') + '?autoImport=1' });
     window.close();
   } else {
-    startKaikkiImport();
+    startReleaseFetch();
   }
 });
 
@@ -325,10 +353,136 @@ const openTab = () => browser.tabs.create({ url: browser.runtime.getURL('popup.h
 btnOpenTab.addEventListener('click', openTab);
 if (popupOpenTabLink) popupOpenTabLink.addEventListener('click', openTab);
 
+// ── Sample words panel ──────────────────────────────────────────────────────
+// Renders lookup results inline when hovering .sample-word spans.
+// Mirrors content.js rendering using sr-* class names (no Shadow DOM needed).
+
+const SR_GENDER_LABELS = { m: 'der', f: 'die', n: 'das' };
+const SR_GENDER_CLASS  = { m: 'sr-gender-m', f: 'sr-gender-f', n: 'sr-gender-n' };
+const SR_TAG_ORDER = [
+  'plural','singular','nominative','accusative','dative','genitive',
+  'comparative','superlative','strong','weak','mixed',
+  'transitive','intransitive',
+  'past','present','future','indicative','subjunctive','imperative','participle',
+  'first-person','second-person','third-person',
+];
+const SR_TAG_NOISE = new Set([
+  'form-of','canonical','error-unknown-tag',
+  'with-dative','with-accusative','with-genitive',
+]);
+
+function srEsc(str) {
+  return String(str)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function buildSrTagRow(entry) {
+  const seen = new Set();
+  const merged = [];
+  const add = t => {
+    const lt = t.toLowerCase().trim();
+    if (!lt || seen.has(lt)) return;
+    seen.add(lt); merged.push(lt);
+  };
+  for (const t of (entry.gramTags ?? [])) add(t);
+  for (const sense of (entry.s ?? []))
+    for (const t of (sense.t ?? []))
+      if (!SR_TAG_NOISE.has(t)) add(t);
+  if (merged.length === 0) return '';
+  const sorted = merged.sort((a, b) => {
+    const ai = SR_TAG_ORDER.indexOf(a), bi = SR_TAG_ORDER.indexOf(b);
+    if (ai !== -1 && bi !== -1) return ai - bi;
+    if (ai !== -1) return -1; if (bi !== -1) return 1;
+    return a.localeCompare(b);
+  });
+  return '<div class="sr-tags-row">' +
+    sorted.map(t => `<span class="sr-gram-tag">${srEsc(t)}</span>`).join('') +
+    '</div>';
+}
+
+function renderSrEntries(entries) {
+  let html = '';
+  const maxTotal = settings.maxSenses ?? 3;
+  const n      = entries.length;
+  const base   = Math.floor(maxTotal / n);
+  const extras = maxTotal % n;
+  const budgets = entries.map((_, i) => Math.max(1, base + (i < extras ? 1 : 0)));
+
+  entries.forEach((entry, idx) => {
+    if (idx > 0) html += '<hr class="sr-sep">';
+    const gc = SR_GENDER_CLASS[entry.g]  ?? '';
+    const gl = SR_GENDER_LABELS[entry.g] ?? '';
+    html += '<div class="sr-head">' +
+      `<span class="sr-word">${srEsc(entry.w)}</span>` +
+      (entry.g && settings.showGender !== false
+        ? `<span class="sr-gender ${gc}">${srEsc(gl)}</span>` : '') +
+      `<span class="sr-pos">${srEsc(entry.p ?? '')}</span>` +
+      '</div>';
+    if (settings.showTags !== false) html += buildSrTagRow(entry);
+    if (settings.showIpa && entry.i)
+      html += `<div class="sr-ipa">${srEsc(entry.i)}</div>`;
+    if (Array.isArray(entry.s) && entry.s.length) {
+      html += '<div class="sr-senses">';
+      const senses = entry.s.slice(0, budgets[idx]);
+      senses.forEach((sense, i) => {
+        const gloss = Array.isArray(sense.gl) ? sense.gl.join('; ') : String(sense);
+        html += '<div class="sr-sense">' +
+          `<span class="sr-sense-num">${senses.length > 1 ? i + 1 : ''}</span>` +
+          `<div class="sr-gloss">${srEsc(gloss)}</div>` +
+          '</div>';
+      });
+      html += '</div>';
+    }
+  });
+  return html;
+}
+
+function renderSrResult(result) {
+  let html = '';
+  result.segments.forEach((seg, si) => {
+    if (si > 0) html += '<hr class="sr-seg-sep">';
+    html += renderSrEntries(seg.entries);
+  });
+  html += '<div class="sr-foot">Wiktionary · CC BY-SA</div>';
+  return html;
+}
+
+function initSamplePanel() {
+  const resultDiv = document.getElementById('sample-result');
+  if (!resultDiv) return;
+
+  document.querySelectorAll('.sample-word').forEach(span => {
+    span.addEventListener('mouseenter', async () => {
+      const word = span.textContent.trim();
+      try {
+        const result = await browser.runtime.sendMessage({
+          type: 'lookup', word, langCode: LANG_CODE,
+        });
+        if (result) {
+          resultDiv.innerHTML = renderSrResult(result);
+        } else {
+          resultDiv.innerHTML =
+            `<span class="sr-miss">Not found in dictionary: ${srEsc(word)}</span>`;
+        }
+      } catch (e) {
+        resultDiv.innerHTML =
+          `<span class="sr-miss">Lookup error: ${srEsc(e.message)}</span>`;
+      }
+      resultDiv.style.display = 'block';
+    });
+  });
+
+  document.getElementById('sample-panel').addEventListener('mouseleave', () => {
+    resultDiv.style.display = 'none';
+  });
+}
+
 // ── Boot ──────────────────────────────────────────────────────────────────
 init().then(() => {
-  // Auto-trigger kaikki import if opened from the popup button
+  initSamplePanel();
+  // Auto-trigger release fetch if opened from the popup button in narrow mode
   if (new URLSearchParams(window.location.search).get('autoImport') === '1') {
-    startKaikkiImport();
+    startReleaseFetch();
   }
 }).catch(console.error);

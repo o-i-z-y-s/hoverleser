@@ -334,15 +334,32 @@ async function lookupWord(db, word, langCode = 'de') {
   }
 
   // Compound splitting: German only; other languages do not use the same
-  // closed-compound convention and Fugen-s stripping would be wrong for them.
+  // closed-compound convention and Fugenelement stripping would be wrong for them.
   if (langCode !== 'de') return null;
 
   // Prefix must be a DIRECT lemma entry to prevent false splits on inflected
-  // forms like "Wörter" (plural of Wort).
+  // forms like "Woerter" (plural of Wort).
   // Suffix uses full lookup so inflected suffixes (e.g. -er, -en) still work.
-  const MIN_PREFIX = 4;
+  //
+  // MIN_PREFIX=3 allows short but real German roots: Bau-, See-, Weg-, Bus-.
+  // False splits are prevented by requiring the suffix to also resolve
+  // independently as a valid dictionary entry.
+  const MIN_PREFIX = 3;
   const MIN_SUFFIX = 3;
   const maxLen = wordLower.length - MIN_SUFFIX;
+
+  // Fugenelemente (German compound-linking elements) to try stripping from
+  // the candidate prefix when it is not itself a direct lemma entry.
+  // Ordered longest-first so shorter strips don't shadow longer correct ones.
+  // Examples of each:
+  //   ens: Herzens+angelegenheit (Herz)
+  //   es:  Tages+ablauf (Tag), Jahres+tag (Jahr)
+  //   er:  Kinder+arzt (Kind), Bilder+buch (Bild)
+  //   en:  (intermediate; caught by n below for most cases)
+  //   n:   Goetzen+bild (Goetze), Sonnen+schein (Sonne), Hunden+halsband (Hund)
+  //   e:   Hunde+huette (Hund), Taube+nschlag (Taube)
+  //   s:   Hochzeits+band (Hochzeit), Geburts+tag (Geburt)
+  const FUGEN = ['ens', 'es', 'er', 'en', 'n', 'e', 's'];
 
   for (let len = maxLen; len >= MIN_PREFIX; len--) {
     const prefixStr = wordLower.slice(0, len);
@@ -350,9 +367,15 @@ async function lookupWord(db, word, langCode = 'de') {
     // 1. Try prefix as-is (direct lemma)
     let prefEntry = await lookupDirectEntry(db, prefixStr);
 
-    // 2. Strip Fugen-s (e.g. "Hochzeits" → "Hochzeit", "Tages" → "Tag")
-    if (!prefEntry && prefixStr.endsWith('s') && prefixStr.length > MIN_PREFIX) {
-      prefEntry = await lookupDirectEntry(db, prefixStr.slice(0, -1));
+    // 2. Try stripping each Fugenelement in order (longest first)
+    if (!prefEntry) {
+      for (const fugen of FUGEN) {
+        if (!prefixStr.endsWith(fugen)) continue;
+        const stripped = prefixStr.slice(0, -fugen.length);
+        if (stripped.length < MIN_PREFIX) continue;
+        prefEntry = await lookupDirectEntry(db, stripped);
+        if (prefEntry) break;
+      }
     }
 
     if (!prefEntry) continue;
@@ -525,11 +548,24 @@ async function lookupCandidate(db, candidate, originalWord, _depth = 0, langCode
     const directIsAltOf  = hasAltOf(direct);
     // Collect POS set of direct entries to avoid redundant forms-index inclusions
     const directPosSet   = new Set(directAll.map(d => d.p));
+    // Case tags signal nominal inflection (noun/pronoun/article declension).
+    // When the direct entry is a non-nominal POS (e.g. verb), forms-index entries
+    // whose only gramTags are case markers are data artifacts, not real relationships.
+    // Example: sein (verb) incorrectly pulls in du/ich/wir from the possessive-pronoun
+    // forms table -- those entries are tagged genitive/singular/masculine.
+    const NOMINAL_POS = new Set(['noun', 'pron', 'art', 'det', 'name']);
+    const CASE_TAGS   = new Set(['nominative', 'accusative', 'dative', 'genitive']);
+    const directPos   = direct.p ?? null;
     for (const {k, t} of formLemmas) {
       const fe = await idbGet(db, 'entries', k);
       if (!fe) continue;
       // Include if: direct is form-of / alt-of (needs real entry) OR POS not already covered
       if (directIsFormOf || directIsAltOf || !directPosSet.has(fe.p)) {
+        // Skip cross-POS forms-index entries that carry only case/agreement tags when
+        // the direct entry is non-nominal: these are Wiktionary data artifacts where
+        // a pronoun declension table records the hover word as a possessive form.
+        if (!directIsFormOf && directPos && !NOMINAL_POS.has(directPos) &&
+            t.length > 0 && t.some(tag => CASE_TAGS.has(tag))) continue;
         const annotated = { ...fe };        // keep lemma's own w (canonical form)
         annotated.gramTags = t;
         collected.push(annotated);

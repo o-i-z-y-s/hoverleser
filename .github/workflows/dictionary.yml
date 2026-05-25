@@ -7,6 +7,7 @@ name: Build Dictionary
     branches: [main]
     paths:
       - 'src/scripts/build-dict.js'
+      - 'src/scripts/supplement.py'
       - 'src/background.js'
   schedule:
     - cron: '0 3 1 * *'
@@ -27,30 +28,83 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
       - name: Read extension version
         id: version
         run: |
           VERSION=$(node -p "require('./src/manifest.json').version")
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
 
-      - name: Build dictionary (German)
+      - name: Cache Argos Translate language pack
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/argos-translate
+          key: argos-de-en-v1
+
+      - name: Install argostranslate
+        run: pip install "argostranslate>=1.9,<3" --break-system-packages
+
+      - name: Build dictionary from en.wiktionary (English glosses)
         working-directory: src
         run: |
           mkdir -p dist
           node scripts/build-dict.js \
             --code de \
-            --out  dist/de-v${{ steps.version.outputs.VERSION }}.jsonl.gz \
-            --compress
+            --out  dist/de-en.jsonl
+          echo "en.wiktionary entries: $(wc -l < dist/de-en.jsonl)"
+
+      - name: Build dictionary from de.wiktionary (German glosses)
+        working-directory: src
+        run: |
           node scripts/build-dict.js \
             --code de \
-            --out  dist/de-v${{ steps.version.outputs.VERSION }}.jsonl
-          ls -lh dist/de-v*.jsonl dist/de-v*.jsonl.gz
+            --url  https://kaikki.org/dewiktionary/Deutsch/kaikki.org-dewiktionary-Deutsch.jsonl \
+            --out  dist/de-de.jsonl
+          echo "de.wiktionary entries: $(wc -l < dist/de-de.jsonl)"
 
-      - name: Upload dictionary to release
+      - name: Merge and translate gap entries
+        working-directory: src
+        run: |
+          python scripts/supplement.py \
+            --primary    dist/de-en.jsonl \
+            --supplement dist/de-de.jsonl \
+            --out        dist/de-extended.jsonl
+          echo "Extended entries: $(wc -l < dist/de-extended.jsonl)"
+
+      - name: Compress extended dictionary
+        working-directory: src
+        run: |
+          VFILE="dist/de-v${{ steps.version.outputs.VERSION }}.jsonl"
+          cp dist/de-extended.jsonl "$VFILE"
+          gzip -k "$VFILE"
+          cp "${VFILE}.gz" dist/de-latest.jsonl.gz
+          ls -lh dist/de-v*.jsonl dist/de-v*.jsonl.gz dist/de-latest.jsonl.gz
+
+      - name: Upload versioned dictionary to version release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version.outputs.VERSION }}
           files: |
             src/dist/de-v${{ steps.version.outputs.VERSION }}.jsonl.gz
-            src/dist/de-v${{ steps.version.outputs.VERSION }}.jsonl
-          fail_on_unmatched_files: false
+          fail_on_unmatched_files: true
+
+      - name: Force-update dict-latest tag
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -f dict-latest
+          git push origin refs/tags/dict-latest --force
+
+      - name: Upload de-latest.jsonl.gz to dict-latest release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: dict-latest
+          name: "Dictionary (latest)"
+          body: "Auto-updated extended German dictionary. Fetch via the extension's Download & Import button."
+          files: |
+            src/dist/de-latest.jsonl.gz
+          fail_on_unmatched_files: true
