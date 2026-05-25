@@ -66,13 +66,22 @@ jobs:
             --out  dist/de-de.jsonl
           echo "de.wiktionary entries: $(wc -l < dist/de-de.jsonl)"
 
+      - name: Cache translation pairs (de->en gloss cache)
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/hoverleser-trans/de-en.json
+          key: hoverleser-trans-de-en-${{ github.run_id }}
+          restore-keys: |
+            hoverleser-trans-de-en-
+
       - name: Merge and translate gap entries
         working-directory: src
         run: |
           python scripts/supplement.py \
             --primary    dist/de-en.jsonl \
             --supplement dist/de-de.jsonl \
-            --out        dist/de-extended.jsonl
+            --out        dist/de-extended.jsonl \
+            --cache-file ~/.cache/hoverleser-trans/de-en.json
           echo "Extended entries: $(wc -l < dist/de-extended.jsonl)"
 
       - name: Compress extended dictionary

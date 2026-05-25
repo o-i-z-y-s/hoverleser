@@ -19,6 +19,7 @@ Options:
     --out         <file>   Output path for the merged extended JSONL
     --progress    <n>      Print progress every N glosses (default: 64)
     --no-translate         Skip MT; keep German glosses as-is (for testing)
+    --cache-file  <file>   Persistent JSON cache for (de->en) gloss pairs
 
 Gap entries' inflected forms ("f" field) are preserved in the output and
 will be indexed into the forms store on import, making their inflections
@@ -49,6 +50,8 @@ def parse_args():
     p.add_argument('--out',          required=True)
     p.add_argument('--progress',     type=int, default=64)
     p.add_argument('--no-translate', action='store_true')
+    p.add_argument('--cache-file',   default=None,
+                   help='Path to persistent JSON translation cache (loaded and updated)')
     return p.parse_args()
 
 
@@ -113,30 +116,56 @@ def make_translator():
     return translation.translate
 
 
-def translate_glosses(entries, translator, progress_interval=64):
+def translate_glosses(entries, translator, cache_file=None, progress_interval=64):
     """
     Translate all gloss strings in-place; add mt=True to each entry.
+
+    Two layers of efficiency:
+      1. Persistent cache: a JSON file stores (German -> English) pairs across
+         CI runs.  Glosses seen in a previous run are never re-translated.
+      2. In-run dedup: identical strings within this run are translated once
+         and the result reused for every duplicate slot.
+
     Per-gloss exceptions keep the original German rather than aborting.
     """
-    texts = []
-    positions = []
+    # Load persistent cache from disk
+    cache = {}
+    if cache_file and os.path.exists(cache_file):
+        try:
+            with open(cache_file, 'r', encoding='utf-8') as fh:
+                cache = json.load(fh)
+            print(f'[translate] Loaded {len(cache)} cached translations from {cache_file}')
+        except Exception as exc:
+            print(f'[translate] WARNING: could not load cache ({exc!r}); starting fresh')
+
+    # Phase 1: collect (ei, si, gi, text) positions; build unique-uncached queue
+    positions    = []   # (ei, si, gi, original_text)
+    to_translate = []   # unique strings not yet in cache
+    queued       = set()
+
     for ei, entry in enumerate(entries):
         for si, sense in enumerate(entry.get('s', [])):
             for gi, gl in enumerate(sense.get('gl', [])):
                 if gl and isinstance(gl, str):
-                    texts.append(gl)
-                    positions.append((ei, si, gi))
+                    positions.append((ei, si, gi, gl))
+                    if gl not in cache and gl not in queued:
+                        queued.add(gl)
+                        to_translate.append(gl)
 
-    total = len(texts)
+    total      = len(to_translate)
+    in_cache   = sum(1 for pos in positions if pos[3] in cache)
+    duplicates = len(positions) - in_cache - total
+
+    print(f'[translate] {len(positions)} gloss slots across {len(entries)} gap entries')
+    print(f'[translate] {total} to translate  |  {in_cache} from cache  |  {duplicates} in-run duplicates')
+
+    # Phase 2: translate unique uncached strings
     errors = 0
-    print(f'[translate] {total} gloss strings across {len(entries)} gap entries')
-
-    translated = []
-    for idx, text in enumerate(texts):
+    for idx, text in enumerate(to_translate):
         try:
-            translated.append(translator(text))
+            cache[text] = translator(text)
         except Exception as exc:
-            translated.append(text)
+            cache[text] = text
             errors += 1
             print(f'\n[translate] WARNING: gloss {idx} failed ({exc!r}); keeping original',
                   flush=True)
@@ -144,12 +173,28 @@ def translate_glosses(entries, translator, progress_interval=64):
             pct = (idx + 1) / total * 100
             print(f'[translate] {idx + 1}/{total} ({pct:.1f}%)', end='\r', flush=True)
 
-    print()
+    if total:
+        print()
+    else:
+        print('[translate] All glosses served from cache, no inference needed')
     if errors:
         print(f'[translate] {errors} glosses kept in German due to translation errors')
 
-    for (ei, si, gi), new_text in zip(positions, translated):
-        entries[ei]['s'][si]['gl'][gi] = new_text
+    # Save updated cache to disk
+    if cache_file:
+        try:
+            cache_dir = os.path.dirname(os.path.abspath(cache_file))
+            if cache_dir:
+                os.makedirs(cache_dir, exist_ok=True)
+            with open(cache_file, 'w', encoding='utf-8') as fh:
+                json.dump(cache, fh, ensure_ascii=False)
+            print(f'[translate] Saved {len(cache)} translations to {cache_file}')
+        except Exception as exc:
+            print(f'[translate] WARNING: could not save cache ({exc!r})')
+
+    # Phase 3: write translations back using the cache
+    for ei, si, gi, text in positions:
+        entries[ei]['s'][si]['gl'][gi] = cache.get(text, text)
 
     for entry in entries:
         entry['mt'] = True
@@ -185,6 +230,7 @@ def main():
         translator = make_translator()
         t0 = time.time()
         gap_entries = translate_glosses(gap_entries, translator,
+                                        cache_file=args.cache_file,
                                         progress_interval=args.progress)
         print(f'[translate] Done in {time.time() - t0:.1f}s')
 
