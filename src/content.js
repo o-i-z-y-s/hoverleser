@@ -210,8 +210,9 @@
     'display: none',
   ].join(';');
 
-  // ── Inject into DOM ──────────────────────────────────────────────────────
+  // ── Inject into / remove from DOM ───────────────────────────────────────
   function injectElements() {
+    if (host.parentNode) return; // already injected
     if (document.body) {
       document.body.appendChild(host);
       document.body.appendChild(highlight);
@@ -219,17 +220,29 @@
       document.addEventListener('DOMContentLoaded', injectElements, { once: true });
     }
   }
-  injectElements();
+
+  function removeElements() {
+    host.remove();
+    highlight.remove();
+    clear();
+  }
 
   // ── Load settings ─────────────────────────────────────────────────────────
+  // Inject into the DOM only if the extension is enabled; this avoids
+  // polluting pages with extension elements when the user has disabled it.
   browser.runtime.sendMessage({ type: 'get-settings' })
-    .then(s => { if (s) settings = s; })
+    .then(s => {
+      if (s) settings = s;
+      if (settings.enabled) injectElements();
+    })
     .catch(() => {});
 
   browser.runtime.onMessage.addListener(msg => {
     if (msg.type === 'settings-changed') {
+      const wasEnabled = settings.enabled;
       settings = msg.settings;
-      if (!settings.enabled) clear();
+      if (settings.enabled && !wasEnabled) injectElements();
+      if (!settings.enabled && wasEnabled) removeElements();
     }
   });
 
@@ -239,13 +252,15 @@
   // message delivery can show the popup for a shared EN/DE word (Motor, Job…).
   browser.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local' || !changes.settings) return;
+    const wasEnabled = settings.enabled;
     const next = Object.assign(
       { enabled: false, langCode: 'de', showIpa: true,
         showTags: true, showGender: true, maxSenses: 3 },
       changes.settings.newValue ?? {}
     );
     settings = next;
-    if (!settings.enabled) clear();
+    if (settings.enabled && !wasEnabled) injectElements();
+    if (!settings.enabled && wasEnabled) removeElements();
   });
 
   // ── Word boundary detection ──────────────────────────────────────────────
