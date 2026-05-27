@@ -131,21 +131,22 @@
     .popup-import-note a { color: #5a8a6a; text-decoration: underline; cursor: pointer; }
 
     /* Sample words panel (tab view only) */
-    .sample-panel { display: none; border-top: 1px solid #262626; }
+    .sample-card { display: none; }
     @media (min-width: 500px) {
-      .sample-panel   { display: block; padding: 0 20px; }
-      .sample-summary {
-        display: flex; align-items: center; gap: 7px;
-        padding: 11px 0; font-size: 15px; color: #888;
-        cursor: pointer; user-select: none; list-style: none;
+      .sample-card {
+        background: #1c1c1c; border-radius: 12px;
+        border: 1px solid #333; overflow: hidden;
+        box-shadow: 0 12px 48px #0009;
+        padding: 16px 20px 20px;
+        display: block;
       }
-      .sample-summary::-webkit-details-marker { display: none; }
-      .sample-summary::before {
-        content: '▶'; font-size: 9px; color: #555;
-        transition: transform .15s; display: inline-block; flex-shrink: 0;
+      .sample-header {
+        font-size: 12px; color: #777; text-transform: uppercase;
+        letter-spacing: 0.08em; padding-bottom: 12px;
+        border-bottom: 1px solid #262626; margin-bottom: 14px;
+        font-weight: 600;
       }
-      .sample-panel[open] .sample-summary::before { transform: rotate(90deg); }
-      .sample-body      { padding-bottom: 18px; display: flex; flex-direction: column; gap: 14px; }
+      .sample-body      { display: flex; flex-direction: column; gap: 14px; }
       .sample-cat-label { font-size: 11px; color: #666; text-transform: uppercase;
                           letter-spacing: 0.08em; margin-bottom: 6px; }
       .sample-words     { display: flex; flex-wrap: wrap; gap: 5px; }
@@ -156,7 +157,7 @@
 
       /* Inline result card for sample panel hover */
       .sample-result { background: #161616; border: 1px solid #2e2e2e; border-radius: 8px;
-                       margin-top: 10px; overflow: hidden; font-size: 13px; }
+                       margin-top: 14px; overflow: hidden; font-size: 13px; }
       .sr-head  { padding: 8px 13px 6px; background: #131313; border-bottom: 1px solid #2a2a2a;
                   display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
       .sr-word  { font-size: 18px; font-weight: 700; color: #f0f0f0; }
@@ -191,7 +192,8 @@
         padding: 48px 16px 64px; background: #141414;
         font-size: 17px;
       }
-      .card { width: 580px; background: #1c1c1c; border-radius: 12px;
+      .page-wrap { display: flex; flex-direction: column; gap: 16px; width: 580px; }
+      .card { width: 100%; background: #1c1c1c; border-radius: 12px;
               border: 1px solid #333; overflow: hidden; box-shadow: 0 12px 48px #0009; }
       .brand-name { font-size: 22px; }
       .brand-sub  { font-size: 14px; }
@@ -216,6 +218,7 @@
   </style>
 </head>
 <body>
+<div class="page-wrap">
 <div class="card">
 
   <div class="header">
@@ -310,88 +313,90 @@
     <button class="btn btn-ghost" id="btn-clear">Remove dictionary</button>
   </div>
 
-  <details class="sample-panel" id="sample-panel">
-    <summary class="sample-summary">Sample words &nbsp;&middot;&nbsp; hover to test</summary>
-    <div class="sample-body">
-
-      <div class="sample-cat">
-        <div class="sample-cat-label">Nouns</div>
-        <div class="sample-words">
-          <span class="sample-word">Haus</span>
-          <span class="sample-word">Hund</span>
-          <span class="sample-word">Straße</span>
-          <span class="sample-word">Börse</span>
-          <span class="sample-word">Wörterbuch</span>
-          <span class="sample-word">Mensch</span>
-          <span class="sample-word">Bank</span>
-        </div>
-      </div>
-
-      <div class="sample-cat">
-        <div class="sample-cat-label">Verbs</div>
-        <div class="sample-words">
-          <span class="sample-word">kaufen</span>
-          <span class="sample-word">laufen</span>
-          <span class="sample-word">sprechen</span>
-          <span class="sample-word">schreiben</span>
-          <span class="sample-word">entwickeln</span>
-          <span class="sample-word">fragen</span>
-        </div>
-      </div>
-
-      <div class="sample-cat">
-        <div class="sample-cat-label">Inflected forms</div>
-        <div class="sample-words">
-          <span class="sample-word">Häuser</span>
-          <span class="sample-word">Wörterbücher</span>
-          <span class="sample-word">Straßen</span>
-          <span class="sample-word">Fragen</span>
-          <span class="sample-word">Sprachen</span>
-        </div>
-      </div>
-
-      <div class="sample-cat">
-        <div class="sample-cat-label">Past participles</div>
-        <div class="sample-words">
-          <span class="sample-word">gesprochen</span>
-          <span class="sample-word">gelaufen</span>
-          <span class="sample-word">geschrieben</span>
-          <span class="sample-word">gefunden</span>
-          <span class="sample-word">gegangen</span>
-        </div>
-      </div>
-
-      <div class="sample-cat">
-        <div class="sample-cat-label">Compound words</div>
-        <div class="sample-words">
-          <span class="sample-word">Hausarbeit</span>
-          <span class="sample-word">Straßenbahn</span>
-          <span class="sample-word">Tageslicht</span>
-          <span class="sample-word">Wörterbuchsuche</span>
-          <span class="sample-word">Hundeleine</span>
-        </div>
-      </div>
-
-      <div class="sample-cat">
-        <div class="sample-cat-label">Adjectives &amp; derived forms</div>
-        <div class="sample-words">
-          <span class="sample-word">schön</span>
-          <span class="sample-word">sprachlich</span>
-          <span class="sample-word">außerbörsliche</span>
-          <span class="sample-word">gehandelte</span>
-          <span class="sample-word">strafbar</span>
-        </div>
-      </div>
-
-    </div>
-    <div class="sample-result" id="sample-result" style="display:none"></div>
-  </details>
-
   <div class="footer">
     Data: <a href="https://kaikki.org" target="_blank">Wiktionary · kaikki.org</a> · CC BY-SA
   </div>
 
 </div>
+
+<div class="sample-card" id="sample-panel">
+  <div class="sample-header">Sample words &nbsp;&middot;&nbsp; hover to test</div>
+  <div class="sample-body">
+
+    <div class="sample-cat">
+      <div class="sample-cat-label">Nouns</div>
+      <div class="sample-words">
+        <span class="sample-word">Haus</span>
+        <span class="sample-word">Hund</span>
+        <span class="sample-word">Straße</span>
+        <span class="sample-word">Börse</span>
+        <span class="sample-word">Wörterbuch</span>
+        <span class="sample-word">Mensch</span>
+        <span class="sample-word">Bank</span>
+      </div>
+    </div>
+
+    <div class="sample-cat">
+      <div class="sample-cat-label">Verbs</div>
+      <div class="sample-words">
+        <span class="sample-word">kaufen</span>
+        <span class="sample-word">laufen</span>
+        <span class="sample-word">sprechen</span>
+        <span class="sample-word">schreiben</span>
+        <span class="sample-word">entwickeln</span>
+        <span class="sample-word">fragen</span>
+      </div>
+    </div>
+
+    <div class="sample-cat">
+      <div class="sample-cat-label">Inflected forms</div>
+      <div class="sample-words">
+        <span class="sample-word">Häuser</span>
+        <span class="sample-word">Wörterbücher</span>
+        <span class="sample-word">Straßen</span>
+        <span class="sample-word">Fragen</span>
+        <span class="sample-word">Sprachen</span>
+      </div>
+    </div>
+
+    <div class="sample-cat">
+      <div class="sample-cat-label">Past participles</div>
+      <div class="sample-words">
+        <span class="sample-word">gesprochen</span>
+        <span class="sample-word">gelaufen</span>
+        <span class="sample-word">geschrieben</span>
+        <span class="sample-word">gefunden</span>
+        <span class="sample-word">gegangen</span>
+      </div>
+    </div>
+
+    <div class="sample-cat">
+      <div class="sample-cat-label">Compound words</div>
+      <div class="sample-words">
+        <span class="sample-word">Hausarbeit</span>
+        <span class="sample-word">Straßenbahn</span>
+        <span class="sample-word">Tageslicht</span>
+        <span class="sample-word">Wörterbuchsuche</span>
+        <span class="sample-word">Hundeleine</span>
+      </div>
+    </div>
+
+    <div class="sample-cat">
+      <div class="sample-cat-label">Adjectives &amp; derived forms</div>
+      <div class="sample-words">
+        <span class="sample-word">schön</span>
+        <span class="sample-word">sprachlich</span>
+        <span class="sample-word">außerbörsliche</span>
+        <span class="sample-word">gehandelte</span>
+        <span class="sample-word">strafbar</span>
+      </div>
+    </div>
+
+  </div>
+  <div class="sample-result" id="sample-result" style="display:none"></div>
+</div>
+
+</div><!-- /.page-wrap -->
 <script src="lib/browser-polyfill.min.js"></script>
 <script src="popup.js"></script>
 </body>
