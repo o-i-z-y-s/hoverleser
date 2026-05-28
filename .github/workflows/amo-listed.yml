@@ -52,7 +52,11 @@ jobs:
             --artifacts-dir dist \
             --api-key    "$AMO_API_KEY" \
             --api-secret "$AMO_API_SECRET" \
-            --channel    listed
+            --channel    listed \
+            --ignore-files \
+              "package.sh" "package.bat" "package.json" "package-lock.json" \
+              "manifest.chrome.json" \
+              "node_modules/**" "dist/**" "scripts/**" "README.md" ".git/**"
 
       - name: Done
         run: |

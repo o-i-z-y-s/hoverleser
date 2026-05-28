@@ -3,9 +3,9 @@
  */
 'use strict';
 
-// Kaikki.org postprocessed JSONL for German (from English Wiktionary).
-// Streamed directly; no API key required.
-const KAIKKI_DE_URL = 'https://kaikki.org/dictionary/German/kaikki.org-dictionary-German.jsonl';
+// Pre-built dictionary served from GitHub Releases (dict-latest tag).
+// Gzip-compressed processed JSONL, ~20 MB download.
+const RELEASES_DICT_URL = 'https://github.com/o-i-z-y-s/hoverleser/releases/download/dict-latest/de-latest.jsonl.gz';
 const LANG_CODE = 'de';
 const LANG_NAME = 'German';
 
@@ -126,8 +126,8 @@ function setMsg(text, type) {
   importMsg.className   = type ? `msg msg-${type}` : 'msg';
 }
 
-// ── Download & import from kaikki.org ────────────────────────────────────
-async function startKaikkiImport() {
+// ── Download & import from GitHub Releases ────────────────────────────────
+async function startDictDownload() {
   setMsg('', '');
   setButtons({ importDisabled: true, clearDisabled: true });
   statusDot.className        = 'dot dot-loading';
@@ -136,7 +136,7 @@ async function startKaikkiImport() {
   progressBar.style.width    = '0%';
 
   try {
-    const resp = await fetch(KAIKKI_DE_URL);
+    const resp = await fetch(RELEASES_DICT_URL);
     if (!resp.ok) throw new Error(`Download failed: HTTP ${resp.status}`);
 
     const contentLength = resp.headers.get('content-length');
@@ -160,8 +160,9 @@ async function startKaikkiImport() {
       }
     }
 
-    const blob = new Blob(chunks, { type: 'application/jsonl' });
-    const file = new File([blob], 'de.jsonl', { type: 'application/jsonl' });
+    const blob = new Blob(chunks, { type: 'application/octet-stream' });
+    // Name must end in .gz so importFile() activates DecompressionStream
+    const file = new File([blob], 'de-latest.jsonl.gz', { type: 'application/octet-stream' });
     progressWrap.style.display = 'none';
     await importFile(file);
   } catch (err) {
@@ -179,7 +180,7 @@ btnImport.addEventListener('click', () => {
     browser.tabs.create({ url: browser.runtime.getURL('popup.html') + '?autoImport=1' });
     window.close();
   } else {
-    startKaikkiImport();
+    startDictDownload();
   }
 });
 
@@ -470,8 +471,8 @@ function initSamplePanel() {
 // ── Boot ──────────────────────────────────────────────────────────────────
 init().then(() => {
   initSamplePanel();
-  // Auto-trigger release fetch if opened from the popup button in narrow mode
+  // Auto-trigger download if opened from the popup button in narrow mode
   if (new URLSearchParams(window.location.search).get('autoImport') === '1') {
-    startKaikkiImport();
+    startDictDownload();
   }
 }).catch(console.error);

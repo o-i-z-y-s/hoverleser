@@ -108,9 +108,9 @@ function idbClear(db, storeName) {
   });
 }
 
-// ── Raw kaikki.org entry processing ───────────────────────────────────────
-// Mirrors build-dict.js so Download & Import can work directly against
-// kaikki.org JSONL without a separate build step.
+// ── Raw entry processing ───────────────────────────────────────────────────
+// Transforms raw kaikki.org JSONL entries into the compact storage format.
+// Used as a fallback when importing a raw (unbuilt) JSONL file directly.
 
 const RAW_POS_MAP = {
   noun:'noun', verb:'verb', adj:'adj', adv:'adv', prep:'prep',
@@ -757,7 +757,7 @@ function defaultSettings() {
 // Tracks in-progress import so popup can poll progress.
 
 let importState = {
-  status:  'idle',   // 'idle' | 'downloading' | 'running' | 'done' | 'error'
+  status:  'idle',   // 'idle' | 'running' | 'done' | 'error'
   lang:    null,
   total:   0,
   done:    0,
@@ -785,7 +785,12 @@ browser.runtime.onMessage.addListener((msg, sender) => {
 
     // ── Word lookup ──────────────────────────────────────────────────────
     case 'lookup': {
-      const { word, langCode } = msg;
+      const word = msg.word;
+      if (typeof word !== 'string' || word.length === 0 || word.length > 200) {
+        return Promise.resolve(null);
+      }
+      const VALID_LANGS = ['de','fr','es','nl','it','pt','ru','zh','ja'];
+      const langCode = VALID_LANGS.includes(msg.langCode) ? msg.langCode : 'de';
       return openDb(langCode).then(db => lookupWord(db, word, langCode));
     }
 
@@ -829,7 +834,7 @@ browser.runtime.onMessage.addListener((msg, sender) => {
     case 'clear-db': {
       const denied = extensionOnly();
       if (denied) return denied;
-      if (importState.status === 'running' || importState.status === 'downloading') {
+      if (importState.status === 'running') {
         return Promise.reject(new Error('Cannot clear while import is in progress'));
       }
       const { langCode } = msg;

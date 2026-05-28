@@ -1,9 +1,12 @@
 # Hoverleser: GitHub Actions release workflow
-# Triggers on every push to main.
-# Produces a signed XPI via AMO (unlisted) and publishes it as a GitHub Release.
+# Triggers on every push to main (excluding updates.json changes so the
+# bot commit that updates updates.json does not retrigger the workflow).
+# Produces a signed XPI via AMO (unlisted), publishes it as a GitHub Release,
+# computes its SHA256, and commits the updated updates.json back to main so
+# Firefox can deliver the update to existing users automatically.
 #
-# Required repository secrets (Settings → Secrets → Actions):
-#   AMO_API_KEY:     addons.mozilla.org/developers, API Keys
+# Required repository secrets (Settings -> Secrets -> Actions):
+#   AMO_API_KEY:    addons.mozilla.org/developers, API Keys
 #   AMO_API_SECRET: same page
 
 name: Build & Release
@@ -11,6 +14,8 @@ name: Build & Release
 "on":
   push:
     branches: [main]
+    paths-ignore:
+      - updates.json
 
 jobs:
   release:
@@ -37,7 +42,7 @@ jobs:
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
           echo "TAG=v$VERSION" >> $GITHUB_OUTPUT
 
-      - name: Sign via AMO
+      - name: Sign via AMO (unlisted)
         id: sign
         continue-on-error: true
         env:
@@ -46,7 +51,8 @@ jobs:
         working-directory: src
         run: bash package.sh sign
 
-      - name: Create GitHub Release
+      - name: Create GitHub Release and upload Firefox XPI
+        if: steps.sign.outcome == 'success'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.TAG }}
@@ -54,7 +60,7 @@ jobs:
           body: |
             ## Hoverleser ${{ steps.version.outputs.TAG }}
 
-            Hover over any German word to see its translation, gender, IPA pronunciation and grammatical forms. Fully offline after one-time dictionary import. Supports Firefox and Chromium-based browsers.
+            Hover over any German word to see its translation, gender, IPA pronunciation, and grammatical forms. Fully offline after one-time dictionary import. Supports Firefox and Chromium-based browsers.
 
             ### Firefox
             Download `hoverleser-*-firefox.xpi` and drag it onto any Firefox window.
@@ -63,11 +69,51 @@ jobs:
             Download `hoverleser-*-chrome.zip`, unzip to a permanent folder, then load via `chrome://extensions` > Developer mode > Load unpacked.
 
             ### Dictionary
-            Download `de-v*.jsonl.gz`, open the extension settings, drag the file onto the import area and wait for the green dot.
+            Open the extension settings and click **Download & Import** to fetch the pre-built dictionary (~20 MB) directly from GitHub Releases. Alternatively, drag a `de-latest.jsonl.gz` file onto the import area.
           files: src/dist/hoverleser-*-firefox.xpi
           draft: false
           prerelease: false
           make_latest: true
+
+      - name: Update updates.json with signed XPI hash
+        if: steps.sign.outcome == 'success'
+        env:
+          VERSION: ${{ steps.version.outputs.VERSION }}
+          REPO:    ${{ github.repository }}
+        run: |
+          XPI=$(find src/dist -name "hoverleser-*-firefox.xpi" | head -1)
+          HASH=$(sha256sum "$XPI" | awk '{print $1}')
+          BASENAME=$(basename "$XPI")
+          URL="https://github.com/${REPO}/releases/download/v${VERSION}/${BASENAME}"
+          python3 - <<PYEOF
+          import json, os
+          version  = os.environ['VERSION']
+          addon_id = 'addon@hoverleser.app'
+          with open('updates.json', 'r') as f:
+              doc = json.load(f)
+          entries = doc['addons'][addon_id]['updates']
+          entries = [e for e in entries if e.get('version') != version]
+          entries.append({
+              'version':     version,
+              'update_link': '${URL}',
+              'update_hash': 'sha256:${HASH}',
+          })
+          doc['addons'][addon_id]['updates'] = entries
+          with open('updates.json', 'w') as f:
+              json.dump(doc, f, indent=2)
+              f.write('\n')
+          print(f"[updates.json] v{version}  sha256:${HASH}")
+          PYEOF
+
+      - name: Commit and push updates.json
+        if: steps.sign.outcome == 'success'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add updates.json
+          git diff --cached --quiet || \
+            git commit -m "chore: update updates.json for v${{ steps.version.outputs.VERSION }} [skip ci]"
+          git push
 
   release-chrome:
     runs-on: ubuntu-latest

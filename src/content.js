@@ -453,9 +453,7 @@
           html += `
             <div class="hd-sense">
               <span class="hd-sense-num">${senses.length > 1 ? i + 1 : ''}</span>
-              <div class="hd-sense-body">
-                <div class="hd-gloss">${esc(gloss)}</div>
-              </div>
+              <div class="hd-gloss">${esc(gloss)}</div>
             </div>`;
         });
         html += '</div>';

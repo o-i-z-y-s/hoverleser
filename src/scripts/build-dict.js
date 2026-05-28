@@ -36,7 +36,7 @@
  *         { "gl":["dog"], "t":["animal"] }
  *       ],
  *       "i":"/hʊnt/",        // IPA (first one found)
- *       "f":["hundes","hunde","hunden"]  // lowercase inflected forms
+ *       "f":[{"f":"hundes","t":["genitive","singular"]},...]  // inflected forms with tags
  *     }
  *
  * The "f" field is consumed by the importer and stored separately in the
@@ -148,7 +148,7 @@ Example:
 
 // ── Processing ────────────────────────────────────────────────────────────
 
-const MAX_SENSES = 3;   // top 3 senses per entry; keeps files lean
+const MAX_SENSES = 5;   // store 5 senses; UI max is 4, so users can change the setting without re-importing
 const MAX_FORMS  = 40;  // max inflected forms stored per entry
 
 // Parts of speech that are useful
@@ -242,25 +242,27 @@ function processEntry(raw, includeforms) {
     };
   });
 
-  // Inflected forms
+  // Inflected forms stored as {f, t} objects so the lookup layer can surface
+  // the grammatical relationship (e.g. "plural · nominative") as tag badges.
   let forms = [];
   if (includeforms && Array.isArray(raw.forms)) {
-    const seen = new Set([word.toLowerCase()]);
+    const seen = new Set([word.toLowerCase().normalize('NFC')]);
     for (const f of raw.forms) {
       const form = (f.form ?? '').trim();
       // Skip template/placeholder forms
       if (!form || form.length > 60 || form.includes('-') && form.length < 3) continue;
-      const fl = form.toLowerCase();
+      const fl = form.toLowerCase().normalize('NFC');
       if (!seen.has(fl)) {
         seen.add(fl);
-        forms.push(fl);
+        const ft = (f.tags ?? []).filter(t => FORM_KEEP.has(t) && !FORM_NOISE.has(t));
+        forms.push({ f: fl, t: ft });
         if (forms.length >= MAX_FORMS) break;
       }
     }
   }
 
   const entry = {
-    k: word.toLowerCase(),
+    k: word.toLowerCase().normalize('NFC'),
     w: word,
     ...(pos    ? { p: pos }    : {}),
     ...(gender ? { g: gender } : {}),
