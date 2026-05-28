@@ -6,6 +6,11 @@
           "version": "1.0.5",
           "update_link": "https://github.com/o-i-z-y-s/hoverleser/releases/download/v1.0.5/hoverleser-1.0.5-signed.xpi",
           "update_hash": "sha256:8cfb7cd1013cbd210c5d7e4b8f880b4c9637e896cff5332a2342647c0fb6d4f4"
+        },
+        {
+          "version": "1.0.8",
+          "update_link": "https://github.com/o-i-z-y-s/hoverleser/releases/download/v1.0.8/hoverleser-1.0.8-firefox.xpi",
+          "update_hash": "sha256:64179b0aeb714f4b2218b401c0c73a0f07651fd923d58af1f0c31937764e3ada"
         }
       ]
     }
