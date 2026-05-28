@@ -155,9 +155,10 @@
                           cursor: pointer; user-select: none; transition: background .12s, color .12s; }
       .sample-word:hover { background: #282828; color: #eee; border-color: #3a3a3a; }
 
-      /* Inline result card for sample panel hover */
-      .sample-result { background: #161616; border: 1px solid #2e2e2e; border-radius: 8px;
-                       margin-top: 14px; overflow: hidden; font-size: 13px; }
+      /* Floating result card for sample panel hover */
+      .sample-result { position: fixed; z-index: 1000; width: 520px;
+                       background: #161616; border: 1px solid #2e2e2e; border-radius: 8px;
+                       overflow: hidden; font-size: 13px; box-shadow: 0 8px 32px #0008; }
       .sr-head  { padding: 8px 13px 6px; background: #131313; border-bottom: 1px solid #2a2a2a;
                   display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
       .sr-word  { font-size: 18px; font-weight: 700; color: #f0f0f0; }

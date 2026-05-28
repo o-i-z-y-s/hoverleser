@@ -442,9 +442,30 @@ function initSamplePanel() {
   const resultDiv = document.getElementById('sample-result');
   if (!resultDiv) return;
 
+  // Mirror content.js placePopup: position below and to the right of the cursor,
+  // flipping left/up when the tooltip would overflow the viewport.
+  const SR_PAD = 12;
+  function placeSampleResult(clientX, clientY) {
+    resultDiv.style.left = '0';
+    resultDiv.style.top  = '0';
+    const pw = resultDiv.offsetWidth;
+    const ph = resultDiv.offsetHeight;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    let x = clientX + SR_PAD;
+    let y = clientY + 22 + SR_PAD;
+    if (x + pw > vw - SR_PAD) x = clientX - pw - SR_PAD;
+    if (y + ph > vh - SR_PAD) y = clientY - ph - SR_PAD;
+    resultDiv.style.left = Math.max(SR_PAD, x) + 'px';
+    resultDiv.style.top  = Math.max(SR_PAD, y) + 'px';
+  }
+
   document.querySelectorAll('.sample-word').forEach(span => {
-    span.addEventListener('mouseenter', async () => {
+    span.addEventListener('mouseenter', async e => {
       const word = span.textContent.trim();
+      resultDiv.style.display = 'block';
+      placeSampleResult(e.clientX, e.clientY);
+
       try {
         const result = await browser.runtime.sendMessage({
           type: 'lookup', word, langCode: LANG_CODE,
@@ -455,11 +476,15 @@ function initSamplePanel() {
           resultDiv.innerHTML =
             `<span class="sr-miss">Not found in dictionary: ${srEsc(word)}</span>`;
         }
-      } catch (e) {
+      } catch (err) {
         resultDiv.innerHTML =
-          `<span class="sr-miss">Lookup error: ${srEsc(e.message)}</span>`;
+          `<span class="sr-miss">Lookup error: ${srEsc(err.message)}</span>`;
       }
-      resultDiv.style.display = 'block';
+      placeSampleResult(e.clientX, e.clientY);
+    });
+
+    span.addEventListener('mousemove', e => {
+      if (resultDiv.style.display === 'block') placeSampleResult(e.clientX, e.clientY);
     });
   });
 
