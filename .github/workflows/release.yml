@@ -49,7 +49,17 @@ jobs:
           AMO_API_KEY:    ${{ secrets.AMO_API_KEY }}
           AMO_API_SECRET: ${{ secrets.AMO_API_SECRET }}
         working-directory: src
-        run: bash package.sh sign
+        run: |
+          mkdir -p dist
+          web-ext sign \
+            --source-dir . \
+            --artifacts-dir dist \
+            --channel unlisted \
+            --api-key    "$AMO_API_KEY" \
+            --api-secret "$AMO_API_SECRET" \
+            --ignore-files \
+              "manifest.chrome.json" \
+              "node_modules/**" "dist/**" "scripts/**" "README.md" ".git/**"
 
       - name: Create GitHub Release and upload Firefox XPI
         if: steps.sign.outcome == 'success'
@@ -134,7 +144,18 @@ jobs:
 
       - name: Build Chrome zip
         working-directory: src
-        run: bash package.sh chrome
+        run: |
+          VERSION=$(node -p "require('./manifest.json').version")
+          mkdir -p dist/.chrome-stage/icons dist/.chrome-stage/lib
+          cp manifest.chrome.json dist/.chrome-stage/manifest.json
+          cp background.js content.js popup.html popup.js dist/.chrome-stage/
+          cp icons/icon16.png icons/icon32.png icons/icon48.png \
+             icons/icon96.png icons/icon128.png dist/.chrome-stage/icons/
+          cp lib/browser-polyfill.min.js dist/.chrome-stage/lib/
+          cd dist/.chrome-stage
+          zip -r "../hoverleser-${VERSION}-chrome.zip" .
+          cd ../..
+          rm -rf dist/.chrome-stage
 
       - name: Upload Chrome zip to Release
         uses: softprops/action-gh-release@v2
