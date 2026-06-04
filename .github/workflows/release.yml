@@ -1,9 +1,19 @@
 # Hoverleser: GitHub Actions release workflow
 # Triggers on every push to main (excluding updates.json changes so the
 # bot commit that updates updates.json does not retrigger the workflow).
-# Produces a signed XPI via AMO (unlisted), publishes it as a GitHub Release,
-# computes its SHA256, and commits the updated updates.json back to main so
-# Firefox can deliver the update to existing users automatically.
+#
+# Two INDEPENDENT jobs run in parallel:
+#   firefox – signs an unlisted XPI via AMO, publishes it to a GitHub Release,
+#             and commits the updated updates.json so Firefox can auto-update.
+#   chrome  – builds the Chromium zip and publishes it to the same Release.
+#
+# Each job uses its own browser-named source manifest (manifest.firefox.json /
+# manifest.chrome.json) and stages it as the manifest.json that the packaged
+# artifact requires.
+#
+# The jobs do NOT depend on one another: if one fails it does not block or
+# cancel the other, and a failed job publishes nothing (each artifact upload
+# only runs after that job's own build/sign step succeeds).
 #
 # Required repository secrets (Settings -> Secrets -> Actions):
 #   AMO_API_KEY:    addons.mozilla.org/developers, API Keys
@@ -18,7 +28,7 @@ name: Build & Release
       - updates.json
 
 jobs:
-  release:
+  firefox:
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -38,19 +48,19 @@ jobs:
       - name: Read version
         id: version
         run: |
-          VERSION=$(node -p "require('./src/manifest.json').version")
+          VERSION=$(node -p "require('./src/manifest.firefox.json').version")
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
           echo "TAG=v$VERSION" >> $GITHUB_OUTPUT
 
       - name: Sign via AMO (unlisted)
-        id: sign
-        continue-on-error: true
         env:
           AMO_API_KEY:    ${{ secrets.AMO_API_KEY }}
           AMO_API_SECRET: ${{ secrets.AMO_API_SECRET }}
         working-directory: src
         run: |
           mkdir -p dist
+          # web-ext / AMO require the packaged manifest to be named manifest.json
+          cp manifest.firefox.json manifest.json
           web-ext sign \
             --source-dir . \
             --artifacts-dir dist \
@@ -58,11 +68,10 @@ jobs:
             --api-key    "$AMO_API_KEY" \
             --api-secret "$AMO_API_SECRET" \
             --ignore-files \
-              "manifest.chrome.json" \
+              "manifest.chrome.json" "manifest.firefox.json" \
               "node_modules/**" "dist/**" "scripts/**" "README.md" ".git/**"
 
       - name: Create GitHub Release and upload Firefox XPI
-        if: steps.sign.outcome == 'success'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.TAG }}
@@ -81,12 +90,12 @@ jobs:
             ### Dictionary
             Open the extension settings and click **Download & Import** to fetch the pre-built dictionary (~20 MB) directly from GitHub Releases. Alternatively, drag a `de-latest.jsonl.gz` file onto the import area.
           files: src/dist/hoverleser-*-firefox.xpi
+          fail_on_unmatched_files: true
           draft: false
           prerelease: false
           make_latest: true
 
       - name: Update updates.json with signed XPI hash
-        if: steps.sign.outcome == 'success'
         env:
           VERSION: ${{ steps.version.outputs.VERSION }}
           REPO:    ${{ github.repository }}
@@ -116,7 +125,6 @@ jobs:
           PYEOF
 
       - name: Commit and push updates.json
-        if: steps.sign.outcome == 'success'
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -125,9 +133,8 @@ jobs:
             git commit -m "chore: update updates.json for v${{ steps.version.outputs.VERSION }} [skip ci]"
           git push
 
-  release-chrome:
+  chrome:
     runs-on: ubuntu-latest
-    needs: release
     permissions:
       contents: write
 
@@ -138,14 +145,14 @@ jobs:
       - name: Read version
         id: version
         run: |
-          VERSION=$(node -p "require('./src/manifest.json').version")
+          VERSION=$(node -p "require('./src/manifest.chrome.json').version")
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
           echo "TAG=v$VERSION" >> $GITHUB_OUTPUT
 
       - name: Build Chrome zip
         working-directory: src
         run: |
-          VERSION=$(node -p "require('./manifest.json').version")
+          VERSION=$(node -p "require('./manifest.chrome.json').version")
           mkdir -p dist/.chrome-stage/icons dist/.chrome-stage/lib
           cp manifest.chrome.json dist/.chrome-stage/manifest.json
           cp background.js content.js popup.html popup.js dist/.chrome-stage/

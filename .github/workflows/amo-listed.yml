@@ -38,7 +38,7 @@ jobs:
       - name: Read version
         id: version
         run: |
-          VERSION=$(node -p "require('./src/manifest.json').version")
+          VERSION=$(node -p "require('./src/manifest.firefox.json').version")
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Submit to AMO for listed review
@@ -47,6 +47,8 @@ jobs:
           AMO_API_SECRET: ${{ secrets.AMO_API_SECRET }}
         working-directory: src
         run: |
+          # web-ext / AMO require the packaged manifest to be named manifest.json
+          cp manifest.firefox.json manifest.json
           web-ext sign \
             --source-dir . \
             --artifacts-dir dist \
@@ -54,7 +56,7 @@ jobs:
             --api-secret "$AMO_API_SECRET" \
             --channel    listed \
             --ignore-files \
-              "manifest.chrome.json" \
+              "manifest.chrome.json" "manifest.firefox.json" \
               "node_modules/**" "dist/**" "scripts/**" "README.md" ".git/**"
 
       - name: Done
