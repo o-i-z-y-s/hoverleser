@@ -17,4 +17,6 @@ docs/
 .vscode/
 *.swp
 
-# (src/lib/ is intentionally committed — see README.md "Vendored dependency" section)
+# Build artifacts (dictionary JSONL/gz, logs, temp files)
+# src/lib/ is intentionally committed (vendored polyfill)
+src/dist/
