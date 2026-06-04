@@ -409,9 +409,14 @@ async function main() {
                     version, entryCount, formCount };
   await write(JSON.stringify(meta));
 
-  // Append tmp content
-  const tmpContent = fs.readFileSync(tmpPath, 'utf8');
-  await write(tmpContent.trimEnd());
+  // Append tmp content by streaming so peak memory stays flat regardless of
+  // dictionary size (avoids buffering the entire processed file as one string).
+  await new Promise((res, rej) => {
+    const rs = fs.createReadStream(tmpPath);
+    rs.on('error', rej);
+    rs.on('end', res);
+    rs.pipe(outStream, { end: false });
+  });
   fs.unlinkSync(tmpPath);
 
   await new Promise((res, rej) => {

@@ -5,7 +5,6 @@
   "description": "Hover over a German word to instantly see its translation, gender, pronunciation, and grammar. All offline after dictionary download, no data sent anywhere.",
   "permissions": [
     "storage",
-    "tabs",
     "<all_urls>"
   ],
   "background": {

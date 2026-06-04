@@ -364,7 +364,7 @@ const SR_TAG_NOISE = new Set([
 function srEsc(str) {
   return String(str)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 function buildSrTagRow(entry) {

@@ -827,9 +827,6 @@ browser.runtime.onMessage.addListener((msg, sender) => {
       return browser.storage.local.set({ settings: safe }).then(() => ({ ok: true }));
     }
 
-    // ── Import dictionary from JSONL text ────────────────────────────────
-    // The popup sends chunks of the JSONL file one at a time.
-
     // ── Clear / reset DB ─────────────────────────────────────────────────
     case 'clear-db': {
       const denied = extensionOnly();
