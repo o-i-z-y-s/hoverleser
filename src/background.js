@@ -108,97 +108,7 @@ function idbClear(db, storeName) {
   });
 }
 
-// ── Raw entry processing ───────────────────────────────────────────────────
-// Transforms raw kaikki.org JSONL entries into the compact storage format.
-// Used as a fallback when importing a raw (unbuilt) JSONL file directly.
-
-const RAW_POS_MAP = {
-  noun:'noun', verb:'verb', adj:'adj', adv:'adv', prep:'prep',
-  pron:'pron', conj:'conj', intj:'intj', num:'num', article:'art',
-  det:'det', particle:'part', name:'name', phrase:'phrase',
-  suffix:'suf', prefix:'pre', proverb:'proverb',
-};
-const RAW_GENDER = { masculine:'m', feminine:'f', neuter:'n' };
-const RAW_FORM_TAGS = new Set([
-  'plural','singular','nominative','accusative','dative','genitive',
-  'masculine','feminine','neuter','strong','weak','mixed',
-  'comparative','superlative','past','present','future',
-  'first-person','second-person','third-person',
-  'indicative','subjunctive','imperative','participle','gerund',
-]);
-const RAW_SENSE_NOISE = new Set([
-  'broadly','narrowly','dated','archaic','obsolete','rare','informal',
-  'colloquial','slang','vulgar','offensive','pejorative','derogatory',
-  'regional','dialectal','nonstandard','proscribed','uncommon',
-]);
-const RAW_MAX_SENSES = 5; // store more than the UI max (4) so users can change the setting without re-importing
-const RAW_MAX_FORMS  = 40;
-
-/**
- * Transform a raw kaikki.org entry object into our compact storage format.
- * Returns null for entries that should be skipped.
- * Forms are stored as { f: string, t: tags[] } objects so the lookup layer
- * can annotate a found entry with its grammatical relationship to the hover word.
- */
-function processRawEntry(raw) {
-  const word = (raw.word ?? '').trim();
-  if (!word || word.length > 80) return null;
-
-  const senses = (raw.senses ?? []).filter(s =>
-    Array.isArray(s.glosses) && s.glosses.some(g => g && g.length > 1)
-  );
-  if (senses.length === 0) return null;
-
-  const pos = RAW_POS_MAP[raw.pos] ?? raw.pos ?? null;
-
-  let gender = null;
-  for (const tag of [...(raw.tags ?? []), ...(senses[0]?.tags ?? [])]) {
-    if (RAW_GENDER[tag]) { gender = RAW_GENDER[tag]; break; }
-  }
-
-  let ipa = null;
-  for (const sound of (raw.sounds ?? [])) {
-    if (sound.ipa) { ipa = sound.ipa.trim(); break; }
-  }
-
-  const processedSenses = senses.slice(0, RAW_MAX_SENSES).map(s => {
-    const gl = (s.glosses ?? []).map(g => g.replace(/\s+/g,' ').trim()).filter(Boolean);
-    const t  = (s.tags ?? []).filter(t => !RAW_SENSE_NOISE.has(t) && !RAW_GENDER[t]);
-    const ft = [...new Set(
-      (s.form_of ?? []).flatMap(fo => fo.tags ?? []).filter(t => RAW_FORM_TAGS.has(t))
-    )];
-    return { gl, ...(t.length ? {t} : {}), ...(ft.length ? {ft} : {}) };
-  });
-
-  const seen  = new Set([word.toLowerCase()]);
-  const forms = [];
-  for (const f of (raw.forms ?? [])) {
-    const form = (f.form ?? '').trim();
-    if (!form || form.length > 60) continue;
-    if (form.includes('-') && form.length < 3) continue;
-    const fl = form.toLowerCase().normalize('NFC');
-    if (!seen.has(fl)) {
-      seen.add(fl);
-      const ft = (f.tags ?? []).filter(t => RAW_FORM_TAGS.has(t));
-      // Store tags alongside each form so lookup can surface the relationship
-      forms.push({ f: fl, t: ft });
-      if (forms.length >= RAW_MAX_FORMS) break;
-    }
-  }
-
-  const k = word.toLowerCase().normalize('NFC');
-  return {
-    k, w: word,
-    ...(pos    ? {p: pos}    : {}),
-    ...(gender ? {g: gender} : {}),
-    s: processedSenses,
-    ...(ipa    ? {i: ipa}    : {}),
-    ...(forms.length ? {f: forms} : {}),
-  };
-}
-
 // ── Bulk import via a single transaction (batched) ─────────────────────────
-const BATCH_SIZE = 2000; // records per transaction
 
 /**
  * Import an array of compact entry objects into the DB.
@@ -218,9 +128,9 @@ async function importBatch(db, records) {
     const batchFormMap = new Map();
 
     for (const rec of records) {
-      // Accept both raw kaikki format (has 'word') and compact format (has 'k')
-      const processed = rec.k ? rec : processRawEntry(rec);
-      if (!processed) continue;
+      // Entries arrive in compact format (produced by build-dict.js); skip malformed.
+      if (!rec || !rec.k) continue;
+      const processed = rec;
 
       const { f: forms, ...entry } = processed;
       entry.k = entry.k.normalize('NFC');
@@ -753,15 +663,26 @@ function defaultSettings() {
   };
 }
 
-// ── Import state machine ───────────────────────────────────────────────────
-// Tracks in-progress import so popup can poll progress.
+// ── Import session ─────────────────────────────────────────────────────────
+// Single source of truth for an in-progress file import: public progress
+// fields (polled by the popup via 'db-status') plus the private dedup/DB
+// machinery. Reset at the start of each import.
 
-let importState = {
-  status:  'idle',   // 'idle' | 'running' | 'done' | 'error'
-  lang:    null,
-  total:   0,
-  done:    0,
-  error:   null,
+let importSession = {
+  status:     'idle',   // 'idle' | 'running' | 'done' | 'error'
+  langCode:   null,
+  lang:       null,
+  db:         null,
+  total:      0,
+  entryCount: 0,
+  formCount:  0,
+  meta:       null,
+  error:      null,
+  // cross-chunk dedup state
+  seen:       new Set(),
+  formOfSet:  new Set(),
+  posSeen:    new Map(),
+  extraQueue: [],
 };
 
 // ── Message router ─────────────────────────────────────────────────────────
@@ -800,7 +721,10 @@ browser.runtime.onMessage.addListener((msg, sender) => {
       return getDbMeta(langCode).then(meta => ({
         ready:      !!meta,
         meta:       meta ?? null,
-        importing:  importState.lang === langCode ? importState : null,
+        importing:  importSession.langCode === langCode
+          ? { status: importSession.status, done: importSession.entryCount,
+              total: importSession.total, error: importSession.error }
+          : null,
       }));
     }
 
@@ -831,7 +755,7 @@ browser.runtime.onMessage.addListener((msg, sender) => {
     case 'clear-db': {
       const denied = extensionOnly();
       if (denied) return denied;
-      if (importState.status === 'running') {
+      if (importSession.status === 'running') {
         return Promise.reject(new Error('Cannot clear while import is in progress'));
       }
       const { langCode } = msg;
@@ -849,16 +773,16 @@ browser.runtime.onMessage.addListener((msg, sender) => {
       const { langCode, lang, totalSize } = msg;
       return startImportFromFileStream(langCode, lang, totalSize)
         .then(() => ({ ok: true }))
-        .catch(err => { importState.status = 'error'; importState.error = err.message; throw err; });
+        .catch(err => { importSession.status = 'error'; importSession.error = err.message; throw err; });
     }
 
     case 'import-file-chunk': {
       const denied = extensionOnly();
       if (denied) return denied;
-      const { langCode, data, meta, done } = msg;
-      return receiveFileChunk(langCode, data, meta ?? null, done)
+      const { data, meta, done } = msg;
+      return receiveFileChunk(data, meta ?? null, done)
         .then(() => ({ ok: true }))
-        .catch(err => { importState.status = 'error'; importState.error = err.message; throw err; });
+        .catch(err => { importSession.status = 'error'; importSession.error = err.message; throw err; });
     }
   }
 });
@@ -886,43 +810,28 @@ browser.runtime.onInstalled.addListener(async ({ reason }) => {
 getSettings().then(s => openDb(s.langCode)).catch(() => {});
 
 // ── File import (chunked from popup) ──────────────────────────────────────
-// The popup streams a local .jsonl/.jsonl.gz file, parses it into entry objects,
-// and sends them here in batches. Dedup and DB writes mirror the URL import path.
-
-let fileImportState = {
-  langCode:   null,
-  lang:       null,
-  db:         null,
-  entryCount: 0,
-  formCount:  0,
-  meta:       null,
-  // cross-chunk dedup state
-  seen:       new Set(),
-  formOfSet:  new Set(),
-  posSeen:    new Map(),
-  extraQueue: [],
-};
+// The popup streams a local .jsonl/.jsonl.gz file, parses it into entry
+// objects, and sends them here in batches. Progress and dedup state live in
+// the shared importSession object declared above.
 
 async function startImportFromFileStream(langCode, lang, totalEntries) {
-  if (importState.status === 'running') throw new Error('Import already in progress');
+  if (importSession.status === 'running') throw new Error('Import already in progress');
 
   const db = await openDb(langCode);
   await idbClear(db, 'entries');
   await idbClear(db, 'forms');
   await idbClear(db, 'meta');
 
-  fileImportState = {
-    langCode, lang, db,
-    entryCount: 0, formCount: 0, meta: null,
+  importSession = {
+    status: 'running', langCode, lang, db,
+    total: totalEntries, entryCount: 0, formCount: 0, meta: null, error: null,
     seen: new Set(), formOfSet: new Set(), posSeen: new Map(), extraQueue: [],
   };
-
-  importState = { status: 'running', lang: langCode, total: totalEntries, done: 0, error: null };
 }
 
 /**
  * Merge queued _extra POS blocks into already-stored entries.
- * Called at the end of both URL and file import paths.
+ * Called at the end of the file import path.
  */
 async function mergeExtraQueue(db, extraQueue) {
   if (extraQueue.length === 0) return;
@@ -957,8 +866,8 @@ function dedupeStreamBatch(records, state) {
   const filtered = [];
 
   for (const rec of records) {
-    const entry = rec.k ? rec : processRawEntry(rec);
-    if (!entry) continue;
+    const entry = rec;
+    if (!entry || !entry.k) continue;
 
     const entryIsFormOf = (entry.s ?? []).length > 0 && (entry.s ?? []).every(s =>
       (s.gl ?? []).some(g => FORM_OF_RE.test(g.trim()))
@@ -994,32 +903,30 @@ function dedupeStreamBatch(records, state) {
 
 // Receives batches of already-parsed entry objects from popup.js.
 // 'data' is an array of entry objects; 'meta' is the metadata object (on last chunk).
-async function receiveFileChunk(langCode, data, metaObj, isLast) {
-  if (!fileImportState.db) throw new Error('No import session active; send import-file-start first');
+async function receiveFileChunk(data, metaObj, isLast) {
+  if (!importSession.db) throw new Error('No import session active; send import-file-start first');
   if (Array.isArray(data) && data.length > 0) {
-    const filtered = dedupeStreamBatch(data, fileImportState);
+    const filtered = dedupeStreamBatch(data, importSession);
     if (filtered.length > 0) {
-      const counts = await importBatch(fileImportState.db, filtered);
-      fileImportState.entryCount += counts.entryCount;
-      fileImportState.formCount  += counts.formCount;
-      importState.done = fileImportState.entryCount;
+      const counts = await importBatch(importSession.db, filtered);
+      importSession.entryCount += counts.entryCount;
+      importSession.formCount  += counts.formCount;
     }
   }
 
   if (isLast) {
-    await mergeExtraQueue(fileImportState.db, fileImportState.extraQueue);
+    await mergeExtraQueue(importSession.db, importSession.extraQueue);
 
-    const m = metaObj ?? fileImportState.meta;
-    await setDbMeta(fileImportState.db, {
-      lang:       fileImportState.lang,
-      langCode:   fileImportState.langCode,
+    const m = metaObj ?? importSession.meta;
+    await setDbMeta(importSession.db, {
+      lang:       importSession.lang,
+      langCode:   importSession.langCode,
       version:    m?.version ?? 'local',
-      entryCount: fileImportState.entryCount,
-      formCount:  fileImportState.formCount,
+      entryCount: importSession.entryCount,
+      formCount:  importSession.formCount,
       importedAt: Date.now(),
     });
-    importState.status = 'done';
-    importState.done   = fileImportState.entryCount;
+    importSession.status = 'done';
   }
 }
 

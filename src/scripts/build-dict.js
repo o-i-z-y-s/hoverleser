@@ -334,9 +334,8 @@ async function main() {
   const formOfEntries = new Map(); // key → form count for form-of entries (for rollback)
   const t0       = Date.now();
 
-  // Reserve line 0 for metadata (we'll rewrite the file header at the end)
-  // Strategy: write entries first, then prepend metadata.
-  // Easier: write to a temp file then prepend.
+  // Entries are written to a temp file first; the final output is the metadata
+  // line followed by the streamed temp contents (assembled after the loop).
   const tmpPath = opts.out + '.tmp';
   const tmp     = fs.createWriteStream(tmpPath, 'utf8');
   const writeTmp = line => new Promise((res, rej) =>

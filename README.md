@@ -37,9 +37,9 @@ The extension ships without a dictionary. After installing, the setup tab opens 
 2. Drag the file onto the import area in the settings tab
 3. Wait for the status dot to turn green
 
-### Option B: Download directly from kaikki.org
+### Option B: One-click download
 
-Click **⬇ Download & Import German** in the settings tab. This fetches ~930 MB of raw Wiktionary data and processes it entirely in-browser. Expect 15-30 minutes depending on your connection.
+Click **⬇ Download & Import German** in the settings tab. This fetches the same pre-built dictionary (~20 MB) directly from GitHub Releases and imports it automatically, no manual download needed.
 
 ### Option C: Build your own
 
