@@ -1,12 +1,19 @@
 # Hoverleser: AMO Listed Submission Workflow
 #
 # Submits the extension to Mozilla AMO for public listing / human review.
-# This is separate from the release workflow which signs for unlisted distribution.
+# This is separate from the release workflow, which signs for unlisted
+# self-distribution.
 #
 # Run manually from the Actions tab when you are ready to submit or resubmit.
 #
-# Required repository secrets (Settings → Secrets → Actions):
-#   AMO_API_KEY:     addons.mozilla.org/developers, API Keys
+# IMPORTANT DIFFERENCE FROM THE UNLISTED BUILD
+#   A listed add-on is updated through AMO itself, so AMO rejects a manifest
+#   that carries browser_specific_settings.gecko.update_url. The staged
+#   manifest.json below therefore has update_url stripped out. The source
+#   manifest.firefox.json keeps it, because the unlisted build needs it.
+#
+# Required repository secrets (Settings -> Secrets -> Actions):
+#   AMO_API_KEY:    addons.mozilla.org/developers, API Keys  (format user:NNNN:NN)
 #   AMO_API_SECRET: same page
 
 name: Submit to AMO (Listed)
@@ -33,13 +40,70 @@ jobs:
           node-version: '20'
 
       - name: Install web-ext
-        run: npm install -g web-ext
+        run: |
+          set -euxo pipefail
+          npm install -g web-ext@8
+          echo "node:    $(node --version)"
+          echo "web-ext: $(web-ext --version)"
 
       - name: Read version
         id: version
         run: |
+          set -euo pipefail
           VERSION=$(node -p "require('./src/manifest.firefox.json').version")
-          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "::notice title=Version::submitting v$VERSION for listed review"
+
+      - name: Preflight checks
+        env:
+          AMO_API_KEY:    ${{ secrets.AMO_API_KEY }}
+          AMO_API_SECRET: ${{ secrets.AMO_API_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${AMO_API_KEY:-}" ]; then
+            echo "::error title=Missing secret::AMO_API_KEY is empty or not set"; exit 1
+          fi
+          if [ -z "${AMO_API_SECRET:-}" ]; then
+            echo "::error title=Missing secret::AMO_API_SECRET is empty or not set"; exit 1
+          fi
+          echo "AMO_API_KEY length:    ${#AMO_API_KEY}"
+          echo "AMO_API_SECRET length: ${#AMO_API_SECRET}"
+          case "$AMO_API_KEY" in
+            user:*) echo "AMO_API_KEY format: ok (user:NNNN:NN)" ;;
+            *) echo "::warning title=Suspicious key::AMO_API_KEY does not start with 'user:'; the key and secret may be swapped" ;;
+          esac
+
+      - name: Stage listed manifest (strip update_url)
+        working-directory: src
+        run: |
+          set -euo pipefail
+          node -e "
+            const fs = require('fs');
+            const m = JSON.parse(fs.readFileSync('manifest.firefox.json', 'utf8'));
+            const g = m.browser_specific_settings?.gecko;
+            if (g && 'update_url' in g) {
+              delete g.update_url;
+              console.log('removed browser_specific_settings.gecko.update_url (not allowed on listed add-ons)');
+            } else {
+              console.log('no update_url present; nothing to strip');
+            }
+            fs.writeFileSync('manifest.json', JSON.stringify(m, null, 2) + '\n');
+          "
+          echo '--- staged manifest.json ---'
+          cat manifest.json
+
+      - name: Lint extension
+        working-directory: src
+        run: |
+          set -euo pipefail
+          # No --self-hosted here: listed submissions are held to the stricter
+          # AMO review rules, and lint should reflect that.
+          web-ext lint \
+            --source-dir . \
+            --warnings-as-errors=false \
+            --ignore-files \
+              "manifest.chrome.json" "manifest.firefox.json" \
+              "node_modules/**" "dist/**" "scripts/**" "README.md" ".git/**"
 
       - name: Submit to AMO for listed review
         env:
@@ -47,19 +111,46 @@ jobs:
           AMO_API_SECRET: ${{ secrets.AMO_API_SECRET }}
         working-directory: src
         run: |
-          # web-ext / AMO require the packaged manifest to be named manifest.json
-          cp manifest.firefox.json manifest.json
+          set -euo pipefail
+          mkdir -p dist
+
+          set +e
           web-ext sign \
+            --verbose \
+            --no-input \
+            --timeout 900000 \
             --source-dir . \
             --artifacts-dir dist \
+            --channel listed \
             --api-key    "$AMO_API_KEY" \
             --api-secret "$AMO_API_SECRET" \
-            --channel    listed \
             --ignore-files \
               "manifest.chrome.json" "manifest.firefox.json" \
-              "node_modules/**" "dist/**" "scripts/**" "README.md" ".git/**"
+              "node_modules/**" "dist/**" "scripts/**" "README.md" ".git/**" \
+            2>&1 | tee ../web-ext-listed.log
+          RC=${PIPESTATUS[0]}
+          set -e
+
+          echo "--- src/dist after submit (rc=$RC) ---"
+          ls -la dist || true
+
+          if [ "$RC" -ne 0 ]; then
+            echo "::error title=Listed submission failed::exit code $RC; log tail below, full log in the web-ext-listed-log artifact"
+            tail -n 60 ../web-ext-listed.log || true
+            exit "$RC"
+          fi
+
+      - name: Upload submission log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-ext-listed-log
+          path: web-ext-listed.log
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Done
         run: |
           echo "Submitted v${{ steps.version.outputs.VERSION }} to AMO for listed review."
+          echo "A listed submission waits for human review; no signed file is published here."
           echo "Check review status at: https://addons.mozilla.org/developers/addon/hoverleser/versions"
