@@ -74,7 +74,10 @@ async function refreshDbStatus() {
   if (importing && importing.status === 'running') {
     const pct = importing.total > 0 ? Math.round(100 * importing.done / importing.total) : 0;
     statusDot.className        = 'dot dot-loading';
-    statusText.innerHTML       = `Importing… <em>${importing.done.toLocaleString()} entries</em>`;
+    statusText.replaceChildren(
+      document.createTextNode('Importing… '),
+      srEl('em', null, `${importing.done.toLocaleString()} entries`),
+    );
     dbMeta.textContent         = importing.total > 0 ? `${pct}% complete` : '';
     progressWrap.style.display = 'block';
     progressBar.style.width    = `${pct}%`;
@@ -131,7 +134,7 @@ async function startDictDownload() {
   setMsg('', '');
   setButtons({ importDisabled: true, clearDisabled: true });
   statusDot.className        = 'dot dot-loading';
-  statusText.innerHTML       = 'Downloading dictionary…';
+  statusText.textContent     = 'Downloading dictionary…';
   progressWrap.style.display = 'block';
   progressBar.style.width    = '0%';
 
@@ -361,10 +364,17 @@ const SR_TAG_NOISE = new Set([
   'with-dative','with-accusative','with-genitive',
 ]);
 
-function srEsc(str) {
-  return String(str)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+/**
+ * Minimal element builder. The sample-word preview below builds DOM nodes
+ * rather than HTML strings: glosses are third-party dictionary text, and
+ * building nodes means no markup in that text can ever be parsed. It also
+ * clears AMO's "Unsafe assignment to innerHTML" review warning.
+ */
+function srEl(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text != null && text !== '') node.textContent = String(text);
+  return node;
 }
 
 function buildSrTagRow(entry) {
@@ -379,20 +389,20 @@ function buildSrTagRow(entry) {
   for (const sense of (entry.s ?? []))
     for (const t of (sense.t ?? []))
       if (!SR_TAG_NOISE.has(t)) add(t);
-  if (merged.length === 0) return '';
+  if (merged.length === 0) return null;
   const sorted = merged.sort((a, b) => {
     const ai = SR_TAG_ORDER.indexOf(a), bi = SR_TAG_ORDER.indexOf(b);
     if (ai !== -1 && bi !== -1) return ai - bi;
     if (ai !== -1) return -1; if (bi !== -1) return 1;
     return a.localeCompare(b);
   });
-  return '<div class="sr-tags-row">' +
-    sorted.map(t => `<span class="sr-gram-tag">${srEsc(t)}</span>`).join('') +
-    '</div>';
+  const row = srEl('div', 'sr-tags-row');
+  for (const t of sorted) row.append(srEl('span', 'sr-gram-tag', t));
+  return row;
 }
 
 function renderSrEntries(entries) {
-  let html = '';
+  const frag = document.createDocumentFragment();
   const maxTotal = settings.maxSenses ?? 3;
   const n      = entries.length;
   const base   = Math.floor(maxTotal / n);
@@ -400,42 +410,46 @@ function renderSrEntries(entries) {
   const budgets = entries.map((_, i) => Math.max(1, base + (i < extras ? 1 : 0)));
 
   entries.forEach((entry, idx) => {
-    if (idx > 0) html += '<hr class="sr-sep">';
+    if (idx > 0) frag.append(srEl('hr', 'sr-sep'));
     const gc = SR_GENDER_CLASS[entry.g]  ?? '';
     const gl = SR_GENDER_LABELS[entry.g] ?? '';
-    html += '<div class="sr-head">' +
-      `<span class="sr-word">${srEsc(entry.w)}</span>` +
-      (entry.g && settings.showGender !== false
-        ? `<span class="sr-gender ${gc}">${srEsc(gl)}</span>` : '') +
-      `<span class="sr-pos">${srEsc(entry.p ?? '')}</span>` +
-      '</div>';
-    if (settings.showTags !== false) html += buildSrTagRow(entry);
-    if (settings.showIpa && entry.i)
-      html += `<div class="sr-ipa">${srEsc(entry.i)}</div>`;
+    const head = srEl('div', 'sr-head');
+    head.append(srEl('span', 'sr-word', entry.w));
+    if (entry.g && settings.showGender !== false) {
+      head.append(srEl('span', `sr-gender ${gc}`, gl));
+    }
+    head.append(srEl('span', 'sr-pos', entry.p ?? ''));
+    frag.append(head);
+
+    if (settings.showTags !== false) {
+      const tagRow = buildSrTagRow(entry);
+      if (tagRow) frag.append(tagRow);
+    }
+    if (settings.showIpa && entry.i) frag.append(srEl('div', 'sr-ipa', entry.i));
     if (Array.isArray(entry.s) && entry.s.length) {
-      html += '<div class="sr-senses">';
+      const sensesBox = srEl('div', 'sr-senses');
       const senses = entry.s.slice(0, budgets[idx]);
       senses.forEach((sense, i) => {
         const gloss = Array.isArray(sense.gl) ? sense.gl.join('; ') : String(sense);
-        html += '<div class="sr-sense">' +
-          `<span class="sr-sense-num">${senses.length > 1 ? i + 1 : ''}</span>` +
-          `<div class="sr-gloss">${srEsc(gloss)}</div>` +
-          '</div>';
+        const row = srEl('div', 'sr-sense');
+        row.append(srEl('span', 'sr-sense-num', senses.length > 1 ? String(i + 1) : ''));
+        row.append(srEl('div', 'sr-gloss', gloss));
+        sensesBox.append(row);
       });
-      html += '</div>';
+      frag.append(sensesBox);
     }
   });
-  return html;
+  return frag;
 }
 
 function renderSrResult(result) {
-  let html = '';
+  const frag = document.createDocumentFragment();
   result.segments.forEach((seg, si) => {
-    if (si > 0) html += '<hr class="sr-seg-sep">';
-    html += renderSrEntries(seg.entries);
+    if (si > 0) frag.append(srEl('hr', 'sr-seg-sep'));
+    frag.append(renderSrEntries(seg.entries));
   });
-  html += '<div class="sr-foot">Wiktionary · CC BY-SA</div>';
-  return html;
+  frag.append(srEl('div', 'sr-foot', 'Wiktionary · CC BY-SA'));
+  return frag;
 }
 
 function initSamplePanel() {
@@ -471,14 +485,16 @@ function initSamplePanel() {
           type: 'lookup', word, langCode: LANG_CODE,
         });
         if (result) {
-          resultDiv.innerHTML = renderSrResult(result);
+          resultDiv.replaceChildren(renderSrResult(result));
         } else {
-          resultDiv.innerHTML =
-            `<span class="sr-miss">Not found in dictionary: ${srEsc(word)}</span>`;
+          resultDiv.replaceChildren(
+            srEl('span', 'sr-miss', `Not found in dictionary: ${word}`),
+          );
         }
       } catch (err) {
-        resultDiv.innerHTML =
-          `<span class="sr-miss">Lookup error: ${srEsc(err.message)}</span>`;
+        resultDiv.replaceChildren(
+          srEl('span', 'sr-miss', `Lookup error: ${err.message}`),
+        );
       }
       placeSampleResult(e.clientX, e.clientY);
     });

@@ -1,33 +1,12 @@
-# Hoverleser: GitHub Actions release workflow
+# Hoverleser: build, sign and publish the browser builds.
 #
-# Trigger: pushes to main (ignoring updates.json, which the bot itself commits),
-# plus manual runs from the Actions tab.
+# Repository secrets (Settings -> Secrets -> Actions):
+#   AMO_API_KEY     addons.mozilla.org/developers, API Keys  (user:NNNN:NN)
+#   AMO_API_SECRET  same page
 #
-# A push does NOT automatically sign. The `version` job first checks whether the
-# manifest version has already been released; if it has, the firefox and chrome
-# jobs are skipped instead of failing. AMO refuses to sign a version it has
-# already signed, so signing only happens on a push that bumps the version.
-#
-# Two INDEPENDENT jobs then run in parallel:
-#   firefox – signs an unlisted XPI via AMO, publishes it to a GitHub Release,
-#             and commits the updated updates.json so Firefox can auto-update.
-#   chrome  – builds the Chromium zip and publishes it to the same Release.
-#
-# Each job uses its own browser-named source manifest (manifest.firefox.json /
-# manifest.chrome.json) and stages it as the manifest.json that the packaged
-# artifact requires. Neither job depends on the other: if one fails it does not
-# block or cancel the other, and a failed job publishes nothing.
-#
-# Required repository secrets (Settings -> Secrets -> Actions):
-#   AMO_API_KEY:    addons.mozilla.org/developers, API Keys  (format user:NNNN:NN)
-#   AMO_API_SECRET: same page
-#
-# NOTE ON THE SIGNED FILENAME
-#   `web-ext sign` does NOT support --filename; the artifact name is decided by
-#   AMO and has varied between web-ext releases (hoverleser-1.1.0.xpi,
-#   addon_hoverleser_app-1.1.0-an+fx.xpi, ...). This workflow therefore renames
-#   whatever single .xpi lands in the artifacts dir to a deterministic
-#   hoverleser-<version>-firefox.xpi and uploads that exact path.
+# AMO signs a given version once. If it holds a version for manual review,
+# re-running this workflow collects the signed file; bumping the version
+# instead strands the one already uploaded.
 
 name: Build & Release
 
@@ -39,13 +18,15 @@ name: Build & Release
   workflow_dispatch:
     inputs:
       force:
-        description: 'Run even if this version already has a release (will fail at AMO if already signed)'
+        description: 'Run even if this version already has a GitHub Release'
         type: boolean
         default: false
 
 jobs:
   version:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       VERSION:  ${{ steps.read.outputs.VERSION }}
       TAG:      ${{ steps.read.outputs.TAG }}
@@ -53,7 +34,7 @@ jobs:
       PROCEED:  ${{ steps.read.outputs.PROCEED }}
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Read and validate version
         id: read
@@ -75,15 +56,19 @@ jobs:
           fi
 
           TAG="v$FF"
+          # Keyed on the XPI asset, not the tag: the chrome job may have
+          # created the release already.
           RELEASED=false
-          if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+          if gh release view "$TAG" --repo "${{ github.repository }}" \
+               --json assets -q '.assets[].name' 2>/dev/null \
+               | grep -qx "hoverleser-${FF}-firefox.xpi"; then
             RELEASED=true
           fi
 
           PROCEED=true
           if [ "$RELEASED" = "true" ] && [ "${FORCE:-false}" != "true" ]; then
             PROCEED=false
-            echo "::notice title=Skipping release::$TAG already exists. Bump \"version\" in both manifests to publish a new release."
+            echo "::notice title=Skipping release::$TAG already has hoverleser-${FF}-firefox.xpi attached. Bump \"version\" in both manifests to publish a new release."
           fi
 
           {
@@ -104,10 +89,10 @@ jobs:
 
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Set up Node 20
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '20'
 
@@ -125,21 +110,18 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Secret presence (lengths only, never the values themselves)
           if [ -z "${AMO_API_KEY:-}" ]; then
             echo "::error title=Missing secret::AMO_API_KEY is empty or not set"; exit 1
           fi
           if [ -z "${AMO_API_SECRET:-}" ]; then
             echo "::error title=Missing secret::AMO_API_SECRET is empty or not set"; exit 1
           fi
-          echo "AMO_API_KEY length:    ${#AMO_API_KEY}"
-          echo "AMO_API_SECRET length: ${#AMO_API_SECRET}"
           case "$AMO_API_KEY" in
             user:*) echo "AMO_API_KEY format: ok (user:NNNN:NN)" ;;
             *) echo "::warning title=Suspicious key::AMO_API_KEY does not start with 'user:'; the key and secret may be swapped" ;;
           esac
 
-          # Manifest sanity: unlisted signing requires an explicit add-on id.
+          # Unlisted signing requires an explicit add-on id.
           node -e "
             const m = require('./src/manifest.firefox.json');
             const g = m.browser_specific_settings?.gecko ?? {};
@@ -154,8 +136,6 @@ jobs:
         run: |
           set -euo pipefail
           cp manifest.firefox.json manifest.json
-          # Surfaces manifest/API errors here instead of as an opaque AMO
-          # validation blob. --self-hosted matches the unlisted channel.
           web-ext lint \
             --source-dir . \
             --self-hosted \
@@ -164,54 +144,90 @@ jobs:
               "manifest.chrome.json" "manifest.firefox.json" \
               "node_modules/**" "dist/**" "scripts/**" "README.md" ".git/**"
 
-      - name: Sign via AMO (unlisted)
-        id: sign
+      # A version that already exists cannot be re-signed, only downloaded.
+      - name: Check AMO for this version
+        id: lookup
         env:
           AMO_API_KEY:    ${{ secrets.AMO_API_KEY }}
           AMO_API_SECRET: ${{ secrets.AMO_API_SECRET }}
           VERSION:        ${{ needs.version.outputs.VERSION }}
+        run: |
+          set -uo pipefail
+          mkdir -p src/dist
+          node scripts/amo-fetch-signed.mjs --version "$VERSION" --out src/dist
+          RC=$?
+          case "$RC" in
+            0)  STATE=ready ;;
+            10) STATE=pending ;;
+            20) STATE=absent ;;
+            *)  echo "::error title=AMO lookup failed::exit code $RC"; exit "$RC" ;;
+          esac
+          echo "STATE=$STATE" >> "$GITHUB_OUTPUT"
+          echo "::notice title=AMO state::$STATE"
+
+      - name: Sign via AMO (unlisted)
+        id: sign
+        if: steps.lookup.outputs.STATE == 'absent'
+        env:
+          # web-ext reads these itself, keeping credentials out of argv.
+          WEB_EXT_API_KEY:    ${{ secrets.AMO_API_KEY }}
+          WEB_EXT_API_SECRET: ${{ secrets.AMO_API_SECRET }}
+          # used by the amo-fetch-signed.mjs fallback below
+          AMO_API_KEY:        ${{ secrets.AMO_API_KEY }}
+          AMO_API_SECRET:     ${{ secrets.AMO_API_SECRET }}
+          VERSION:            ${{ needs.version.outputs.VERSION }}
         working-directory: src
         run: |
-          set -euo pipefail
-          mkdir -p dist
+          set -uo pipefail
           rm -f dist/*.xpi
           # web-ext / AMO require the packaged manifest to be named manifest.json
           cp manifest.firefox.json manifest.json
 
-          set +e
+          # --approval-timeout is the signing wait: past ~6 min the version is
+          # in a human review queue, which no amount of waiting will clear.
           web-ext sign \
             --verbose \
             --no-input \
-            --timeout 900000 \
+            --timeout 300000 \
+            --approval-timeout 360000 \
             --source-dir . \
             --artifacts-dir dist \
             --channel unlisted \
-            --api-key    "$AMO_API_KEY" \
-            --api-secret "$AMO_API_SECRET" \
             --ignore-files \
               "manifest.chrome.json" "manifest.firefox.json" \
               "node_modules/**" "dist/**" "scripts/**" "README.md" ".git/**" \
             2>&1 | tee ../web-ext-sign.log
           SIGN_RC=${PIPESTATUS[0]}
-          set -e
 
           echo "--- src/dist after sign (rc=$SIGN_RC) ---"
           ls -la dist || true
 
           if [ "$SIGN_RC" -ne 0 ]; then
+            # Held for review, or a real failure?
+            cd ..
+            node scripts/amo-fetch-signed.mjs --version "$VERSION" --out src/dist
+            LOOKUP_RC=$?
+            if [ "$LOOKUP_RC" -eq 10 ]; then
+              echo "STATE=pending" >> "$GITHUB_OUTPUT"
+              echo "::warning title=Awaiting AMO review::The upload succeeded but AMO has not signed v$VERSION yet, so nothing was published. Re-run this workflow once AMO approves it. Do NOT bump the version and do NOT re-sign: the version already exists on AMO."
+              exit 0
+            fi
+            if [ "$LOOKUP_RC" -eq 0 ]; then
+              echo "STATE=ready" >> "$GITHUB_OUTPUT"
+              echo "::notice title=Recovered::sign timed out but the signed XPI was downloadable"
+              exit 0
+            fi
             echo "::error title=web-ext sign failed::exit code $SIGN_RC; log tail below, full log in the web-ext-sign-log artifact"
-            tail -n 60 ../web-ext-sign.log || true
+            tail -n 60 web-ext-sign.log || true
             exit "$SIGN_RC"
           fi
 
-          # `web-ext sign` has no --filename option and AMO's naming has changed
-          # across web-ext versions, so normalize to one predictable name.
           mapfile -t XPIS < <(find dist -maxdepth 1 -name '*.xpi' | sort)
           echo "xpi files found: ${#XPIS[@]}"
           if [ "${#XPIS[@]}" -gt 0 ]; then printf '  %s\n' "${XPIS[@]}"; fi
 
           if [ "${#XPIS[@]}" -eq 0 ]; then
-            echo "::error title=No XPI produced::web-ext sign reported success but wrote no .xpi to src/dist. The version may have been signed on AMO while the download failed; check https://addons.mozilla.org/developers/addon/hoverleser/versions before re-running."
+            echo "::error title=No XPI produced::web-ext sign reported success but wrote no .xpi to src/dist"
             exit 1
           fi
           if [ "${#XPIS[@]}" -gt 1 ]; then
@@ -224,22 +240,49 @@ jobs:
             echo "renaming ${XPIS[0]} -> $TARGET"
             mv "${XPIS[0]}" "$TARGET"
           fi
-          echo "XPI_PATH=src/$TARGET" >> "$GITHUB_OUTPUT"
+          echo "STATE=ready" >> "$GITHUB_OUTPUT"
           echo "::notice title=Signed::$TARGET ($(stat -c%s "$TARGET") bytes)"
 
-      - name: Upload sign log on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
+      - name: Resolve publish state
+        id: state
+        env:
+          RAW_STATE: ${{ steps.sign.outputs.STATE || steps.lookup.outputs.STATE }}
+          VERSION:   ${{ needs.version.outputs.VERSION }}
+        run: |
+          set -euo pipefail
+          STATE="$RAW_STATE"
+          echo "STATE=$STATE" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Firefox v$VERSION"
+            case "$STATE" in
+              ready)   echo "Signed XPI in hand; publishing the release." ;;
+              pending) echo "Uploaded to AMO but **awaiting review**. Nothing published. Re-run this workflow later; do not bump the version." ;;
+              *)       echo "Unexpected state: \`$STATE\`" ;;
+            esac
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Redact sign log
+        if: always()
+        run: |
+          # web-ext does not log credentials today; this keeps that true after upgrades.
+          [ -f web-ext-sign.log ] && \
+            sed -i -E 's/(JWT|Bearer|api.?key|api.?secret)[=: ]+[A-Za-z0-9._:-]+/\1 [redacted]/gI' web-ext-sign.log
+          exit 0
+
+      - name: Upload sign log
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: web-ext-sign-log
           path: |
             web-ext-sign.log
             src/dist/
-          if-no-files-found: warn
+          if-no-files-found: ignore
           retention-days: 7
 
       - name: Create GitHub Release and upload Firefox XPI
-        uses: softprops/action-gh-release@v2
+        if: steps.state.outputs.STATE == 'ready'
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: ${{ needs.version.outputs.TAG }}
           name: Hoverleser ${{ needs.version.outputs.TAG }}
@@ -256,22 +299,22 @@ jobs:
 
             ### Dictionary
             Open the extension settings and click **Download & Import** to fetch the pre-built dictionary (~20 MB) directly from GitHub Releases. Alternatively, drag a `de-latest.jsonl.gz` file onto the import area.
-          files: ${{ steps.sign.outputs.XPI_PATH }}
+          files: src/dist/hoverleser-${{ needs.version.outputs.VERSION }}-firefox.xpi
           fail_on_unmatched_files: true
           draft: false
           prerelease: false
           make_latest: true
 
       - name: Update updates.json with signed XPI hash
+        if: steps.state.outputs.STATE == 'ready'
         env:
           VERSION: ${{ needs.version.outputs.VERSION }}
           REPO:    ${{ github.repository }}
-          XPI:     ${{ steps.sign.outputs.XPI_PATH }}
         run: |
           set -euo pipefail
+          XPI="src/dist/hoverleser-${VERSION}-firefox.xpi"
           HASH=$(sha256sum "$XPI" | awk '{print $1}')
-          BASENAME=$(basename "$XPI")
-          URL="https://github.com/${REPO}/releases/download/v${VERSION}/${BASENAME}"
+          URL="https://github.com/${REPO}/releases/download/v${VERSION}/$(basename "$XPI")"
           export HASH URL
           python3 - <<'PYEOF'
           import json, os
@@ -294,6 +337,9 @@ jobs:
           PYEOF
 
       - name: Commit and push updates.json
+        if: steps.state.outputs.STATE == 'ready'
+        env:
+          VERSION: ${{ needs.version.outputs.VERSION }}
         run: |
           set -euo pipefail
           git config user.name  "github-actions[bot]"
@@ -303,7 +349,7 @@ jobs:
             echo "updates.json unchanged; nothing to commit"
             exit 0
           fi
-          git commit -m "chore: update updates.json for v${{ needs.version.outputs.VERSION }} [skip ci]"
+          git commit -m "chore: update updates.json for v${VERSION} [skip ci]"
           git pull --rebase --autostash origin main
           git push origin HEAD:main
 
@@ -316,7 +362,7 @@ jobs:
 
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Build Chrome zip
         env:
@@ -337,7 +383,7 @@ jobs:
           ls -la dist
 
       - name: Upload Chrome zip to Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: ${{ needs.version.outputs.TAG }}
           files: src/dist/hoverleser-${{ needs.version.outputs.VERSION }}-chrome.zip

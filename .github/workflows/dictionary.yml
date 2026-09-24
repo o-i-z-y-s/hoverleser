@@ -16,10 +16,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Set up Node 20
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '20'
 
@@ -45,7 +45,7 @@ jobs:
           ls -lh dist/de-*.jsonl dist/de-*.jsonl.gz
 
       - name: Upload versioned dictionary to dated release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: dict-${{ steps.compress.outputs.DICT_DATE }}
           name: "Dictionary ${{ steps.compress.outputs.DICT_DATE }}"
@@ -53,6 +53,7 @@ jobs:
           files: |
             src/dist/de-${{ steps.compress.outputs.DICT_DATE }}.jsonl.gz
           fail_on_unmatched_files: true
+          make_latest: false
 
       - name: Force-update dict-latest tag
         run: |
@@ -62,7 +63,7 @@ jobs:
           git push origin refs/tags/dict-latest --force
 
       - name: Upload de-latest.jsonl.gz to dict-latest release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: dict-latest
           name: "Dictionary (latest)"
@@ -70,3 +71,4 @@ jobs:
           files: |
             src/dist/de-latest.jsonl.gz
           fail_on_unmatched_files: true
+          make_latest: false

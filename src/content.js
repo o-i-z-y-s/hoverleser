@@ -377,6 +377,19 @@
     'first-person','second-person','third-person',
   ];
 
+  /**
+   * Minimal element builder. Everything below constructs DOM nodes rather than
+   * HTML strings: dictionary glosses are third-party text, and building nodes
+   * means no markup in that text can ever be parsed. It also clears AMO's
+   * "Unsafe assignment to innerHTML" review warning.
+   */
+  function el(tag, className, text) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text != null && text !== '') node.textContent = String(text);
+    return node;
+  }
+
   function buildTagRow(entry) {
     // Merge gramTags (from form-of resolution) with relevant sense-level t-tags.
     // Deduplicate and sort by TAG_ORDER; unlisted tags go at the end alphabetically.
@@ -401,7 +414,7 @@
       }
     }
 
-    if (merged.length === 0) return '';
+    if (merged.length === 0) return null;
 
     const sorted = merged.sort((a, b) => {
       const ai = TAG_ORDER.indexOf(a);
@@ -412,12 +425,13 @@
       return a.localeCompare(b);
     });
 
-    const badges = sorted.map(t => `<span class="hd-gram-tag">${esc(t)}</span>`).join('');
-    return `<div class="hd-tags-row">${badges}</div>`;
+    const row = el('div', 'hd-tags-row');
+    for (const t of sorted) row.append(el('span', 'hd-gram-tag', t));
+    return row;
   }
 
   function renderEntries(entries) {
-    let html = '';
+    const frag = document.createDocumentFragment();
     // Distribute sense budget across all POS entries in this segment.
     // Each entry gets at least 1 sense; surplus goes to earlier entries.
     // This prevents a word with many POS blocks (e.g. verb + pronoun) from
@@ -429,63 +443,58 @@
     const budgets = entries.map((_, i) => Math.max(1, base + (i < extras ? 1 : 0)));
 
     entries.forEach((entry, idx) => {
-      if (idx > 0) html += '<hr class="hd-sep">';
+      if (idx > 0) frag.append(el('hr', 'hd-sep'));
 
       const genderLabel = GENDER_LABELS[entry.g] ?? '';
       const genderClass = GENDER_CLASS[entry.g]  ?? '';
-      html += `<div class="hd-head">
-        <span class="hd-word">${esc(entry.w)}</span>
-        ${(entry.g && settings.showGender !== false) ? `<span class="hd-gender ${genderClass}">${esc(genderLabel)}</span>` : ''}
-        <span class="hd-pos">${esc(entry.p ?? '')}</span>
-      </div>`;
+      const head = el('div', 'hd-head');
+      head.append(el('span', 'hd-word', entry.w));
+      if (entry.g && settings.showGender !== false) {
+        head.append(el('span', `hd-gender ${genderClass}`, genderLabel));
+      }
+      head.append(el('span', 'hd-pos', entry.p ?? ''));
+      frag.append(head);
 
       // Unified, ordered tag row; one per entry, directly below the word header
-      if (settings.showTags !== false) html += buildTagRow(entry);
+      if (settings.showTags !== false) {
+        const tagRow = buildTagRow(entry);
+        if (tagRow) frag.append(tagRow);
+      }
 
       if (settings.showIpa && entry.i) {
-        html += `<div class="hd-ipa">${esc(entry.i)}</div>`;
+        frag.append(el('div', 'hd-ipa', entry.i));
       }
       if (Array.isArray(entry.s) && entry.s.length) {
-        html += '<div class="hd-senses">';
+        const sensesBox = el('div', 'hd-senses');
         const senses = entry.s.slice(0, budgets[idx]);
         senses.forEach((sense, i) => {
           const gloss = Array.isArray(sense.gl) ? sense.gl.join('; ') : String(sense);
-          html += `
-            <div class="hd-sense">
-              <span class="hd-sense-num">${senses.length > 1 ? i + 1 : ''}</span>
-              <div class="hd-gloss">${esc(gloss)}</div>
-            </div>`;
+          const row = el('div', 'hd-sense');
+          row.append(el('span', 'hd-sense-num', senses.length > 1 ? String(i + 1) : ''));
+          row.append(el('div', 'hd-gloss', gloss));
+          sensesBox.append(row);
         });
-        html += '</div>';
+        frag.append(sensesBox);
       }
     });
-    return html;
+    return frag;
   }
 
   function renderResult(lookupResult) {
     const { segments } = lookupResult;
-    let html = '';
+    const frag = document.createDocumentFragment();
 
     segments.forEach((seg, si) => {
       if (si > 0) {
-        html += '<hr class="hd-seg-sep">';
+        frag.append(el('hr', 'hd-seg-sep'));
       }
 
-      html += renderEntries(seg.entries);
+      frag.append(renderEntries(seg.entries));
     });
 
-    html += `<div class="hd-foot">Wiktionary · CC BY-SA</div>`;
-    popup.innerHTML = html;
+    frag.append(el('div', 'hd-foot', 'Wiktionary · CC BY-SA'));
+    popup.replaceChildren(frag);
     popup.style.display = 'block';
-  }
-
-  function esc(str) {
-    return String(str)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
   }
 
   // ── Popup positioning ─────────────────────────────────────────────────────
