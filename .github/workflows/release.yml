@@ -152,10 +152,12 @@ jobs:
           AMO_API_SECRET: ${{ secrets.AMO_API_SECRET }}
           VERSION:        ${{ needs.version.outputs.VERSION }}
         run: |
+          # GitHub runs run: blocks with `bash -e`, so a non-zero exit must be
+          # caught with `|| RC=$?` or the step dies before the case below.
           set -uo pipefail
           mkdir -p src/dist
-          node scripts/amo-fetch-signed.mjs --version "$VERSION" --out src/dist
-          RC=$?
+          RC=0
+          node scripts/amo-fetch-signed.mjs --version "$VERSION" --out src/dist || RC=$?
           case "$RC" in
             0)  STATE=ready ;;
             10) STATE=pending ;;
@@ -185,7 +187,8 @@ jobs:
 
           # --approval-timeout is the signing wait: past ~6 min the version is
           # in a human review queue, which no amount of waiting will clear.
-          web-ext sign \
+          SIGN_RC=0
+          { web-ext sign \
             --verbose \
             --no-input \
             --timeout 300000 \
@@ -196,8 +199,7 @@ jobs:
             --ignore-files \
               "manifest.chrome.json" "manifest.firefox.json" \
               "node_modules/**" "dist/**" "scripts/**" "README.md" ".git/**" \
-            2>&1 | tee ../web-ext-sign.log
-          SIGN_RC=${PIPESTATUS[0]}
+            2>&1 | tee ../web-ext-sign.log; } || SIGN_RC=${PIPESTATUS[0]}
 
           echo "--- src/dist after sign (rc=$SIGN_RC) ---"
           ls -la dist || true
@@ -205,8 +207,8 @@ jobs:
           if [ "$SIGN_RC" -ne 0 ]; then
             # Held for review, or a real failure?
             cd ..
-            node scripts/amo-fetch-signed.mjs --version "$VERSION" --out src/dist
-            LOOKUP_RC=$?
+            LOOKUP_RC=0
+            node scripts/amo-fetch-signed.mjs --version "$VERSION" --out src/dist || LOOKUP_RC=$?
             if [ "$LOOKUP_RC" -eq 10 ]; then
               echo "STATE=pending" >> "$GITHUB_OUTPUT"
               echo "::warning title=Awaiting AMO review::The upload succeeded but AMO has not signed v$VERSION yet, so nothing was published. Re-run this workflow once AMO approves it. Do NOT bump the version and do NOT re-sign: the version already exists on AMO."
