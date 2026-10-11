@@ -1,0 +1,8 @@
+{
+  "name": "hoverleser-dev",
+  "private": true,
+  "description": "Development scripts for Hoverleser. The extension itself is in src/ and has no dependencies.",
+  "scripts": {
+    "test": "node --test --test-reporter=./tests/reporter.mjs"
+  }
+}

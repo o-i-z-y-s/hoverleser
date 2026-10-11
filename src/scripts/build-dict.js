@@ -5,21 +5,21 @@
  * Downloads a language's structured Wiktionary data from kaikki.org and
  * processes it into a compact JSONL file ready for import into the extension.
  *
- * Usage:
+ * Usage (from the src/ directory):
+ *   node scripts/build-dict.js --code de --compress
  *   node scripts/build-dict.js --lang German --out dist/de.jsonl
- *   node scripts/build-dict.js --lang French  --out dist/fr.jsonl
- *   node scripts/build-dict.js --lang Spanish --out dist/es.jsonl
- *
- *   # Or using short codes:
- *   node scripts/build-dict.js --code de --out dist/de.jsonl
  *
  * Options:
  *   --lang <name>    Full language name as on kaikki.org (e.g. "German")
- *   --code <code>    Language code (de/fr/es/nl/it/pt/ru) – resolves --lang
- *   --out  <file>    Output file path (default: dist/<code>.jsonl)
+ *   --code <code>    Language code (any key of LANG_MAP below) – resolves --lang
+ *   --out  <file>    Output file path (default: dist/<code>.jsonl, or .jsonl.gz
+ *                    with --compress)
  *   --url  <url>     Override source URL (advanced)
+ *   --in   <file>    Read kaikki JSONL from a local file (.jsonl or .jsonl.gz)
+ *                    instead of downloading it
  *   --max  <n>       Stop after <n> entries (for testing)
  *   --no-forms       Skip building the inflection forms index
+ *   --compress       Gzip the output
  *
  * Output format (JSONL, one JSON object per line):
  *
@@ -27,7 +27,10 @@
  *     { "type":"meta", "lang":"German", "langCode":"de",
  *       "version":"2026-02", "entryCount":N, "formCount":N }
  *
- *   Remaining lines – entries:
+ *   Remaining lines – entries. A key can appear on more than one line: once
+ *   per part of speech or etymology (Leben noun + leben verb), and again when
+ *   a line with real definitions follows a form-of stub for the same key. The
+ *   importer merges them (see dedupeStreamBatch in background.js).
  *     { "k":"hund",          // lowercase lookup key
  *       "w":"Hund",          // original display form
  *       "p":"noun",          // part of speech
@@ -52,7 +55,7 @@
 const fs   = require('fs');
 const path = require('path');
 const zlib = require('zlib');
-const { Readable } = require('stream');
+const readline = require('readline');
 
 // ── Language map ──────────────────────────────────────────────────────────
 const LANG_MAP = {
@@ -88,7 +91,7 @@ function kaikkiUrl(langName) {
 // ── CLI args ──────────────────────────────────────────────────────────────
 function parseArgs() {
   const args   = process.argv.slice(2);
-  const opts   = { lang: null, code: null, out: null, url: null, max: Infinity, forms: true, compress: false };
+  const opts   = { lang: null, code: null, out: null, url: null, in: null, max: Infinity, forms: true, compress: false };
   const errors = [];
 
   for (let i = 0; i < args.length; i++) {
@@ -97,6 +100,7 @@ function parseArgs() {
       case '--code':     opts.code     = args[++i]; break;
       case '--out':      opts.out      = args[++i]; break;
       case '--url':      opts.url      = args[++i]; break;
+      case '--in':       opts.in       = args[++i]; break;
       case '--max':      opts.max      = parseInt(args[++i], 10); break;
       case '--no-forms':  opts.forms    = false; break;
       case '--compress':  opts.compress  = true;  break;
@@ -129,12 +133,13 @@ function parseArgs() {
 function printHelp() {
   console.log(`
 Hoverleser – Dictionary Build Script
-Usage: node scripts/build-dict.js --lang <Language> --out dist/<code>.jsonl
+Usage (from src/): node scripts/build-dict.js --code <code> [--compress]
 
   --lang <name>   Full language name, e.g. "German", "French", "Spanish"
   --code <code>   Two-letter code (de/fr/es/…) – resolves --lang automatically
   --out  <file>   Output path     (default: dist/<code>.jsonl)
   --url  <url>    Override source URL
+  --in   <file>   Read kaikki JSONL from a local file instead of downloading
   --max  <n>      Process at most <n> entries (for quick testing)
   --no-forms      Skip inflected-forms index (smaller file, worse inflection lookup)
   --compress      Gzip the output (.jsonl.gz, ~75% smaller; recommended)
@@ -142,16 +147,18 @@ Usage: node scripts/build-dict.js --lang <Language> --out dist/<code>.jsonl
 Available codes: ${Object.keys(LANG_MAP).join(', ')}
 
 Example:
-  node scripts/build-dict.js --code de --out dist/de.jsonl
+  node scripts/build-dict.js --code de --compress
 `);
 }
 
 // ── Processing ────────────────────────────────────────────────────────────
 
-const MAX_SENSES = 5;   // store 5 senses; UI max is 4, so users can change the setting without re-importing
-const MAX_FORMS  = 40;  // max inflected forms stored per entry
+const MAX_SENSES   = 5;   // store 5 senses; UI max is 4, so users can change the setting without re-importing
+const MAX_FORMS    = 40;  // max inflected forms stored per entry
+const MAX_READINGS = 4;   // max entries written per key; matches MAX_BLOCKS in background.js
 
-// Parts of speech that are useful
+// Short names for kaikki's part-of-speech labels. A label that is not listed
+// is stored as kaikki spells it.
 const POS_MAP = {
   noun:     'noun', verb: 'verb', adj: 'adj',
   adv:      'adv',  prep: 'prep', pron: 'pron',
@@ -164,11 +171,120 @@ const POS_MAP = {
 // Gender tags in kaikki data
 const GENDER_TAGS = { masculine: 'm', feminine: 'f', neuter: 'n' };
 
+// Sense tags about register or usage, not stored.
+const NOISE_TAGS = new Set([
+  'broadly', 'narrowly', 'dated', 'archaic', 'obsolete',
+  'rare', 'informal', 'colloquial', 'slang', 'vulgar',
+  'offensive', 'pejorative', 'derogatory', 'regional',
+  'dialectal', 'nonstandard', 'proscribed', 'uncommon',
+]);
+
+// Grammatical tags worth keeping on an inflected form or a form-of sense.
+const FORM_KEEP = new Set([
+  'plural', 'singular', 'nominative', 'accusative', 'dative', 'genitive',
+  'masculine', 'feminine', 'neuter', 'strong', 'weak', 'mixed',
+  'comparative', 'superlative', 'past', 'present', 'future',
+  'first-person', 'second-person', 'third-person',
+  'indicative', 'subjunctive', 'imperative', 'infinitive',
+  'participle', 'gerund',
+]);
+
+// kaikki's name for a tag → the name stored. German verb tables call the
+// simple past "preterite"; headword lines call it "past". One name is kept so
+// "sprach" and "sprachen" are badged alike.
+const FORM_TAG_ALIASES = { preterite: 'past' };
+
+// Rows of an inflection table that are not forms of the word: the name of
+// the table template ("de-ndecl"), its declension class ("strong"), the
+// auxiliary verb ("haben"), and compound tenses ("habe gesprochen").
+const FORM_SKIP_TAGS = new Set([
+  'table-tags', 'inflection-template', 'class', 'auxiliary', 'multiword-construction',
+]);
+
+/** The stored grammatical tags for a kaikki tag list. */
+function keptFormTags(tags) {
+  const kept = (tags ?? []).map(t => FORM_TAG_ALIASES[t] ?? t).filter(t => FORM_KEEP.has(t));
+  return [...new Set(kept)];
+}
+
+// ── Form-of glosses ───────────────────────────────────────────────────────
+// A copy of the same section in background.js: the build script and the
+// extension do not share a module. tests/formof-sync.test.js fails if the two
+// copies drift apart. Change both together.
+
+// Words that describe an inflection of the base word.
+const INFLECTION_WORDS = new Set([
+  'inflection', 'inflected', 'form', 'degree', 'and', 'or',
+  'singular', 'plural',
+  'nominative', 'accusative', 'dative', 'genitive',
+  'masculine', 'feminine', 'neuter',
+  'strong', 'weak', 'mixed',
+  'comparative', 'superlative',
+  'first-person', 'second-person', 'third-person',
+  'first', 'second', 'third',   // "first/third-person" splits into "first" + "third-person"
+  'present', 'past', 'preterite', 'perfect', 'future',
+  'indicative', 'subjunctive', 'i', 'ii', 'imperative', 'dependent',
+  'participle', 'infinitive', 'zu-infinitive',
+]);
+
+// Words that describe a different word standing in a fixed relation to the base.
+const LEXICAL_WORDS = new Set([
+  'alternative', 'obsolete', 'archaic', 'dated', 'deprecated', 'standard',
+  'superseded', 'nonstandard', 'informal', 'rare', 'censored', 'pronunciation',
+  'eye', 'letter-case', 'switzerland', 'liechtenstein', 'spelling',
+  'misspelling', 'female', 'male', 'equivalent', 'diminutive', 'augmentative',
+  'agent', 'verbal', 'noun', 'gerund', 'nominalization', 'abbreviation',
+  'syllabic', 'initialism', 'clipping', 'ellipsis', 'contraction', 'short',
+  'synonym',
+]);
+
+/**
+ * Parse a gloss of the shape "<relation words> of <base>".
+ * See parseFormOf in background.js for the rules.
+ *
+ * @returns {{lead: string[], base: string, kind: 'inflection'|'lexical'}|null}
+ */
+function parseFormOf(gloss, taggedFormOf = false) {
+  const m = /^((?:[\w./-]+\s+)*?)of\s+(\S+)(.*)$/i.exec((gloss ?? '').trim());
+  if (!m) return null;
+
+  const lead = m[1].toLowerCase().split(/\s+/).filter(Boolean);
+  if (lead.length === 0) return null;
+  const parts = lead.flatMap(w => w.split('/'));
+  const kind = parts.every(w => INFLECTION_WORDS.has(w)) ? 'inflection'
+             : parts.every(w => INFLECTION_WORDS.has(w) || LEXICAL_WORDS.has(w)) ? 'lexical'
+             : null;
+  if (!kind) return null;
+
+  const base = m[2].replace(/[:;,.]+$/, '');
+  if (!base) return null;
+  const clauseEnded = base.length < m[2].length;
+  const rest = m[3].trim();
+  if (rest && !/^which\b/i.test(rest)) {
+    if (kind === 'lexical') return null;
+    if (!taggedFormOf && !clauseEnded && !/^[:;,("“„]/.test(rest)) return null;
+  }
+  return { lead, base, kind };
+}
+
+/** parseFormOf for a whole sense; see parseSenseFormOf in background.js. */
+function parseSenseFormOf(sense) {
+  const glosses = Array.isArray(sense?.gl) ? sense.gl : [];
+  const parsed = parseFormOf(glosses[0], (sense?.t ?? []).includes('form-of'));
+  return parsed && parsed.kind === 'lexical' && glosses.length > 1 ? null : parsed;
+}
+
+/** True when every sense of a processed entry is a form-of stub. */
+function isFormOfEntry(entry) {
+  const senses = entry?.s ?? [];
+  return senses.length > 0 && senses.every(s => parseSenseFormOf(s) !== null);
+}
+
 /**
  * Convert a raw kaikki.org entry to our compact format.
  * Returns null if the entry should be skipped.
  */
-function processEntry(raw, includeforms) {
+function processEntry(raw, includeForms) {
   const word = (raw.word ?? '').trim();
   if (!word || word.length > 80) return null;
 
@@ -201,27 +317,6 @@ function processEntry(raw, includeforms) {
   }
 
   // Senses: collect glosses + useful tags (filter noise)
-  const NOISE_TAGS = new Set([
-    'broadly', 'narrowly', 'dated', 'archaic', 'obsolete',
-    'rare', 'informal', 'colloquial', 'slang', 'vulgar',
-    'offensive', 'pejorative', 'derogatory', 'regional',
-    'dialectal', 'nonstandard', 'proscribed', 'uncommon',
-  ]);
-  // Grammatical tags from kaikki's form_of field (e.g. ["plural","nominative","strong"])
-  // These describe how the word relates to its lemma and are stored as `ft`.
-  // We keep only the tags that are meaningful for display, dropping gender/noise.
-  const FORM_NOISE = new Set([
-    'error-unknown-tag', 'include-suffix', 'canonical',
-  ]);
-  const FORM_KEEP = new Set([
-    'plural', 'singular', 'nominative', 'accusative', 'dative', 'genitive',
-    'masculine', 'feminine', 'neuter', 'strong', 'weak', 'mixed',
-    'comparative', 'superlative', 'past', 'present', 'future',
-    'first-person', 'second-person', 'third-person',
-    'indicative', 'subjunctive', 'imperative', 'infinitive',
-    'participle', 'gerund',
-  ]);
-
   const processedSenses = senses.slice(0, MAX_SENSES).map(s => {
     const gl = (s.glosses ?? [])
       .map(g => g.replace(/\s+/g, ' ').trim())
@@ -229,11 +324,9 @@ function processEntry(raw, includeforms) {
     const t  = (s.tags ?? [])
       .filter(t => !NOISE_TAGS.has(t) && !GENDER_TAGS[t]);
 
-    // Capture form_of tags: the grammatical relationship info kaikki stores separately
-    const formOfTags = (s.form_of ?? [])
-      .flatMap(fo => fo.tags ?? [])
-      .filter(t => FORM_KEEP.has(t) && !FORM_NOISE.has(t));
-    const ft = [...new Set(formOfTags)]; // deduplicate
+    // Grammatical tags kaikki attaches to the form_of reference itself;
+    // stored as `ft` and shown as badges when the stub is resolved.
+    const ft = keptFormTags((s.form_of ?? []).flatMap(fo => fo.tags ?? []));
 
     return {
       gl,
@@ -245,17 +338,18 @@ function processEntry(raw, includeforms) {
   // Inflected forms stored as {f, t} objects so the lookup layer can surface
   // the grammatical relationship (e.g. "plural · nominative") as tag badges.
   let forms = [];
-  if (includeforms && Array.isArray(raw.forms)) {
+  if (includeForms && Array.isArray(raw.forms)) {
     const seen = new Set([word.toLowerCase().normalize('NFC')]);
     for (const f of raw.forms) {
       const form = (f.form ?? '').trim();
-      // Skip template/placeholder forms
+      // Skip placeholders ("-"), table metadata, and anything with a space in
+      // it: a hover selects a single word, so a phrase could never be looked up.
       if (!form || form.length > 60 || form.includes('-') && form.length < 3) continue;
+      if (/\s/.test(form) || (f.tags ?? []).some(t => FORM_SKIP_TAGS.has(t))) continue;
       const fl = form.toLowerCase().normalize('NFC');
       if (!seen.has(fl)) {
         seen.add(fl);
-        const ft = (f.tags ?? []).filter(t => FORM_KEEP.has(t) && !FORM_NOISE.has(t));
-        forms.push({ f: fl, t: ft });
+        forms.push({ f: fl, t: keptFormTags(f.tags) });
         if (forms.length >= MAX_FORMS) break;
       }
     }
@@ -274,7 +368,66 @@ function processEntry(raw, includeforms) {
   return entry;
 }
 
+// ── Deduplication ─────────────────────────────────────────────────────────
+
+/**
+ * Decides, entry by entry, which processed entries are written.
+ *
+ * kaikki emits one entry per word, part of speech, and etymology, in no
+ * useful order, so one lowercase key can arrive several times:
+ *
+ *   • The first entry for a key is written.
+ *   • A form-of stub for a key that is already written is skipped; the forms
+ *     index still links the form to its lemma.
+ *   • An entry with real definitions is written after a stub for its key (the
+ *     importer replaces the stub) and after other real entries for its key
+ *     (the importer keeps them all as readings), up to MAX_READINGS.
+ *
+ * accept(entry) returns true when the entry should be written and keeps the
+ * counts for the metadata line.
+ */
+function createDeduper() {
+  const readings = new Map();   // key → real entries written; 0 = a stub holds the key
+  const stubForms = new Map();  // key → form count of the stub holding the key
+  const counts = { entryCount: 0, formCount: 0, readingCount: 0 };
+
+  function accept(entry) {
+    const forms = entry.f?.length ?? 0;
+    const formOf = isFormOfEntry(entry);
+
+    if (!readings.has(entry.k)) {
+      readings.set(entry.k, formOf ? 0 : 1);
+      if (formOf) stubForms.set(entry.k, forms);
+      counts.entryCount++;
+      counts.formCount += forms;
+      return true;
+    }
+    if (formOf) return false;
+
+    const written = readings.get(entry.k);
+    if (written >= MAX_READINGS) return false;
+    readings.set(entry.k, written + 1);
+    if (written === 0) {
+      counts.formCount -= stubForms.get(entry.k) ?? 0;   // the stub is replaced
+      stubForms.delete(entry.k);
+    } else {
+      counts.readingCount++;
+    }
+    counts.formCount += forms;
+    return true;
+  }
+
+  return { accept, counts };
+}
+
 // ── Stream helpers ────────────────────────────────────────────────────────
+
+/** Lines of a local .jsonl or .jsonl.gz file. */
+async function* fileLines(file) {
+  let input = fs.createReadStream(file);
+  if (file.endsWith('.gz')) input = input.pipe(zlib.createGunzip());
+  yield* readline.createInterface({ input, crlfDelay: Infinity });
+}
 
 async function* streamLines(url) {
   console.log(`Downloading: ${url}`);
@@ -286,8 +439,6 @@ async function* streamLines(url) {
   });
   if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${url}`);
 
-  // Check if gzip-encoded; fetch() auto-decompresses when Content-Encoding is set,
-  // but kaikki.org serves raw JSONL, so we may need to handle .gz URLs separately.
   const reader = resp.body.getReader();
   const dec    = new TextDecoder();
   let   buf    = '';
@@ -310,7 +461,7 @@ async function main() {
   const opts = parseArgs();
   console.log(`\nHoverleser build-dict`);
   console.log(`Language : ${opts.lang} (${opts.code})`);
-  console.log(`Source   : ${opts.url}`);
+  console.log(`Source   : ${opts.in ?? opts.url}`);
   console.log(`Output   : ${opts.out}\n`);
 
   // Ensure output directory exists
@@ -325,14 +476,9 @@ async function main() {
     outStream.write(line + '\n', err => err ? rej(err) : res())
   );
 
-  let entryCount = 0;
-  let formCount  = 0;
-  let skipped    = 0;
-  let lineNum    = 0;
-  const seenKeys    = new Set(); // all seen lowercase keys
-  const formOfKeys  = new Set(); // keys whose stored entry is currently form-of
-  const formOfEntries = new Map(); // key → form count for form-of entries (for rollback)
-  const t0       = Date.now();
+  let skipped = 0;
+  const { accept, counts } = createDeduper();
+  const t0 = Date.now();
 
   // Entries are written to a temp file first; the final output is the metadata
   // line followed by the streamed temp contents (assembled after the loop).
@@ -345,54 +491,23 @@ async function main() {
   console.log('Processing entries…');
 
   try {
-    for await (const line of streamLines(opts.url)) {
-      lineNum++;
+    for await (const line of (opts.in ? fileLines(opts.in) : streamLines(opts.url))) {
       if (!line.trim()) continue;
 
       let raw;
       try { raw = JSON.parse(line); }
       catch { skipped++; continue; }
 
-      if (entryCount >= opts.max) break;
+      if (counts.entryCount >= opts.max) break;
 
       const entry = processEntry(raw, opts.forms);
-      if (!entry) { skipped++; continue; }
-
-      // Deduplicate: prefer entries with real definitions over form-of entries.
-      // Kaikki emits entries in arbitrary order; if the first entry for a key
-      // is a form-of (e.g. "plural of X"), we store it, but if a later entry
-      // for the same key has real senses we upgrade to that instead.
-      const isFormOf = entry.s.every(s =>
-        (s.gl ?? []).some(g => /^(\w[\w.()/-]*\s+)*of\s+\S/i.test(g))
-      );
-      if (seenKeys.has(entry.k)) {
-        // Only upgrade if new entry has real senses and stored one was form-of
-        if (!isFormOf && formOfKeys.has(entry.k)) {
-          // Replace: write updated entry to tmp stream (will overwrite in DB)
-          formOfKeys.delete(entry.k);
-          formCount -= (formOfEntries.get(entry.k) ?? 0);
-          formCount += (entry.f?.length ?? 0);
-          formOfEntries.delete(entry.k);
-          await writeTmp(JSON.stringify(entry));
-        } else {
-          skipped++;
-        }
-        continue;
-      }
-      seenKeys.add(entry.k);
-      if (isFormOf) {
-        formOfKeys.add(entry.k);
-        formOfEntries.set(entry.k, entry.f?.length ?? 0);
-      }
-
-      formCount += (entry.f?.length ?? 0);
-      entryCount++;
+      if (!entry || !accept(entry)) { skipped++; continue; }
 
       await writeTmp(JSON.stringify(entry));
 
-      if (entryCount % 10000 === 0) {
+      if (counts.entryCount % 10000 === 0) {
         const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
-        process.stdout.write(`  ${entryCount.toLocaleString()} entries (${elapsed}s)…\r`);
+        process.stdout.write(`  ${counts.entryCount.toLocaleString()} entries (${elapsed}s)…\r`);
       }
     }
   } catch (err) {
@@ -405,7 +520,7 @@ async function main() {
   // Write output: metadata line first, then all entries
   const version = new Date().toISOString().slice(0, 7); // "YYYY-MM"
   const meta    = { type: 'meta', lang: opts.lang, langCode: opts.code,
-                    version, entryCount, formCount };
+                    version, entryCount: counts.entryCount, formCount: counts.formCount };
   await write(JSON.stringify(meta));
 
   // Append tmp content by streaming so peak memory stays flat regardless of
@@ -428,16 +543,23 @@ async function main() {
   const sizeKb  = Math.round(fs.statSync(opts.out).size / 1024);
 
   console.log(`\n\n✓ Done in ${elapsed}s`);
-  console.log(`  Entries : ${entryCount.toLocaleString()}`);
-  console.log(`  Forms   : ${formCount.toLocaleString()}`);
+  console.log(`  Entries : ${counts.entryCount.toLocaleString()}`);
+  console.log(`  Readings: ${counts.readingCount.toLocaleString()} more for keys with several`);
+  console.log(`  Forms   : ${counts.formCount.toLocaleString()}`);
   console.log(`  Skipped : ${skipped.toLocaleString()}`);
   console.log(`  Output  : ${opts.out} (${sizeKb.toLocaleString()} KB)`);
-  console.log(`\nNext steps:`);
-  console.log(`  Drag ${opts.out} onto the extension popup to import, or`);
-  console.log(`  host it somewhere and click "Download & Import".\n`);
+  console.log(`\nNext step: open the extension's settings tab and drop ${opts.out}`);
+  console.log(`onto its import area.\n`);
 }
 
-main().catch(err => {
-  console.error('\nFatal error:', err.message);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch(err => {
+    console.error('\nFatal error:', err.message);
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  processEntry, createDeduper, parseFormOf, parseSenseFormOf, isFormOfEntry,
+  INFLECTION_WORDS, LEXICAL_WORDS, MAX_READINGS,
+};

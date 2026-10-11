@@ -15,6 +15,9 @@ name: Build & Release
     branches: [main]
     paths-ignore:
       - updates.json
+  schedule:
+    # AMO holds this add-on's versions for review; this collects one once signed.
+    - cron: '17 */6 * * *'
   workflow_dispatch:
     inputs:
       force:
@@ -185,14 +188,14 @@ jobs:
           # web-ext / AMO require the packaged manifest to be named manifest.json
           cp manifest.firefox.json manifest.json
 
-          # --approval-timeout is the signing wait: past ~6 min the version is
-          # in a human review queue, which no amount of waiting will clear.
+          # Wait only long enough for an instant auto-approval; anything slower
+          # is a review queue, and the scheduled run collects it later.
           SIGN_RC=0
           { web-ext sign \
             --verbose \
             --no-input \
             --timeout 300000 \
-            --approval-timeout 360000 \
+            --approval-timeout 120000 \
             --source-dir . \
             --artifacts-dir dist \
             --channel unlisted \
@@ -229,8 +232,19 @@ jobs:
           if [ "${#XPIS[@]}" -gt 0 ]; then printf '  %s\n' "${XPIS[@]}"; fi
 
           if [ "${#XPIS[@]}" -eq 0 ]; then
-            echo "::error title=No XPI produced::web-ext sign reported success but wrote no .xpi to src/dist"
-            exit 1
+            LOOKUP_RC=0
+            ( cd .. && node scripts/amo-fetch-signed.mjs --version "$VERSION" --out src/dist ) \
+              || LOOKUP_RC=$?
+            if [ "$LOOKUP_RC" -eq 10 ]; then
+              echo "STATE=pending" >> "$GITHUB_OUTPUT"
+              echo "::warning title=Awaiting AMO review::v$VERSION is uploaded but not signed yet, so nothing was published. The scheduled run collects it once AMO approves. Do NOT bump the version."
+              exit 0
+            fi
+            if [ "$LOOKUP_RC" -ne 0 ]; then
+              echo "::error title=No XPI produced::sign wrote no .xpi and the AMO lookup failed with $LOOKUP_RC"
+              exit 1
+            fi
+            mapfile -t XPIS < <(find dist -maxdepth 1 -name '*.xpi' | sort)
           fi
           if [ "${#XPIS[@]}" -gt 1 ]; then
             echo "::error title=Ambiguous XPI::more than one .xpi in src/dist; refusing to guess which to publish"

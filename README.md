@@ -10,7 +10,7 @@ Supports **Firefox** and **Chromium-based browsers** (Chrome, Edge, Brave, etc.)
 
 ### Firefox
 
-1. Go to the [latest release](https://github.com/o-i-z-y-s/hoverleser/releases/latest) and click `hoverleser-x.x.x-signed.xpi`
+1. Go to the [latest release](https://github.com/o-i-z-y-s/hoverleser/releases/latest) and click `hoverleser-x.x.x-firefox.xpi`
 2. Firefox will prompt "Allow github.com to install an add-on?" Click **Continue to Installation**, then **Add**
 3. The setup tab opens automatically. Import the dictionary before first use (see below)
 
@@ -18,7 +18,7 @@ Once installed, **updates are automatic.** Firefox checks for new versions rough
 
 ### Chrome / Chromium
 
-1. Go to the [latest release](https://github.com/o-i-z-y-s/hoverleser/releases/latest) and download `hoverleser-chrome-x.x.x.zip`
+1. Go to the [latest release](https://github.com/o-i-z-y-s/hoverleser/releases/latest) and download `hoverleser-x.x.x-chrome.zip`
 2. Unzip it to a permanent folder on your computer
 3. Go to `chrome://extensions`, enable **Developer mode**, click **Load unpacked**, and select that folder
 4. The setup tab opens automatically. Import the dictionary before first use (see below)
@@ -33,7 +33,7 @@ The extension ships without a dictionary. After installing, the setup tab opens 
 
 ### Option A: Pre-built file (recommended)
 
-1. Download `de-vx.x.x.jsonl.gz` (~20 MB) from the [latest release](https://github.com/o-i-z-y-s/hoverleser/releases/latest)
+1. Download `de-latest.jsonl.gz` (~20 MB) from the [dictionary release](https://github.com/o-i-z-y-s/hoverleser/releases/tag/dict-latest)
 2. Drag the file onto the import area in the settings tab
 3. Wait for the status dot to turn green
 
@@ -46,27 +46,50 @@ Click **⬇ Download & Import German** in the settings tab. This fetches the sam
 Requires Node.js 18+:
 
 ```sh
-node src/scripts/build-dict.js --code de --out dist/de.jsonl --compress
+cd src
+node scripts/build-dict.js --code de --compress
 ```
 
-Then drag the output file onto the import area.
+Then drag the output file (`src/dist/de.jsonl.gz`) onto the import area.
 
 ---
 
 ## Development
 
-**Test in Firefox:** load the source directory directly, no packaging needed:
+The browser loads the extension from `src/`, and expects the manifest to be named `manifest.json`. That file is not committed: copy the one for your browser first.
 
-1. Go to `about:debugging` > This Firefox > Load Temporary Add-on
-2. Select any file inside `src/`
-
-**Test in Chrome:** build a local zip and load it unpacked:
+**Test in Firefox:**
 
 ```sh
-cd src && bash package.sh chrome
-# output: dist/hoverleser-x.x.x-chrome.zip
+cp src/manifest.firefox.json src/manifest.json
 ```
 
-Unzip and load via `chrome://extensions` > Developer mode > Load unpacked.
+1. Go to `about:debugging` > This Firefox > Load Temporary Add-on
+2. Select `src/manifest.json`
 
-**Release:** push to `main`.
+**Test in Chrome:**
+
+```sh
+cp src/manifest.chrome.json src/manifest.json
+```
+
+1. Go to `chrome://extensions` and enable Developer mode
+2. Click Load unpacked and select the `src/` folder
+
+Open the Hoverleser toolbar popup and click **⤢** for the settings tab. Its sample panel looks up any word you type and shows a set of words that exercise each kind of lookup.
+
+**Run the tests** (Node.js 18.15+, no dependencies to install):
+
+```sh
+npm test
+```
+
+This prints one line per group of tests, and the expected and actual result of anything that failed. Every check, with the result each test word produced, goes to `tests/last-run.log`. Plain `node --test` runs the same tests with Node's own output.
+
+The tests load `src/background.js` with a stand-in for the browser APIs and look up the words in `tests/fixtures/lookups.json` against a small excerpt of the dictionary. After changing the lookup code, the build script, or the fixture words, regenerate the excerpt and review the changed expectations:
+
+```sh
+node tests/make-fixture.js --dict src/dist/de.jsonl.gz --update
+```
+
+**Release:** bump `version` in both manifests and push to `main`.

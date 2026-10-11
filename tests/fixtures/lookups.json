@@ -1,0 +1,477 @@
+{
+  "note": "Regression cases for the word lookup. A case is a word, or { word, sentenceInitial, hidden } (see lookup() in tests/harness.js). Each value under \"expect\" is the output of summarize(): [text covered] Word(part of speech){tags}, with \"~\" after an inferred match, \"word(class)<base+-suffix\" for a derived word, \"/\" between readings, and \"||\" between compound parts. Regenerate the expectations and the mini dictionary with: node tests/make-fixture.js --dict <full dictionary> --update",
+  "groups": [
+    {
+      "name": "plain entries",
+      "words": [
+        "Haus",
+        "Hund",
+        "Straße",
+        "Börse",
+        "Wörterbuch",
+        "kaufen",
+        "laufen",
+        "sprechen",
+        "entwickeln",
+        "schön",
+        "sprachlich",
+        "strafbar"
+      ]
+    },
+    {
+      "name": "inflected forms",
+      "words": [
+        "Häuser",
+        "Wörterbücher",
+        "Straßen",
+        "gesprochen",
+        "gelaufen",
+        "geschrieben",
+        "gefunden",
+        "gegangen",
+        "kleineres",
+        "entwickelte",
+        "angerufen",
+        "aufzumachen"
+      ]
+    },
+    {
+      "name": "form-of stubs resolve to their base",
+      "words": [
+        "Sprachen",
+        "sprachen",
+        "war",
+        "besser",
+        "das",
+        "wen",
+        "Thür",
+        "Neuigkeiten",
+        "hinge"
+      ]
+    },
+    {
+      "name": "glosses that only look like form-of stay definitions",
+      "words": [
+        "Todesursache",
+        "Beweismittel",
+        "Regler",
+        "Lehrerin",
+        "Häuschen",
+        "Berliner"
+      ]
+    },
+    {
+      "name": "several readings under one key",
+      "words": [
+        "Leben",
+        "leben",
+        "Mensch",
+        "Bank",
+        "Banken",
+        "Bänke",
+        "Essen",
+        "essen",
+        "Morgen",
+        "morgen",
+        "Weg",
+        "weg",
+        "bitte",
+        "Bitte",
+        "Lebens",
+        "lebten",
+        "aßen"
+      ]
+    },
+    {
+      "name": "an entry of its own, and an inflected form of another word",
+      "words": [
+        "gefallen",
+        "Karten",
+        "früher",
+        "später",
+        "schönen",
+        "wasser",
+        "Wasser",
+        "Trainer",
+        "ich",
+        "dich",
+        "Frieden"
+      ]
+    },
+    {
+      "name": "capitalization",
+      "words": [
+        "fragen",
+        "Fragen",
+        "Liebe",
+        "liebe",
+        "Schöne",
+        "lauf",
+        "Lauf",
+        "download",
+        {
+          "word": "Lauf",
+          "sentenceInitial": true
+        },
+        {
+          "word": "Haus",
+          "sentenceInitial": true
+        },
+        "HAUS"
+      ]
+    },
+    {
+      "name": "compounds: linking elements",
+      "words": [
+        "Hochzeitsband",
+        "Hochzeitsgeschenk",
+        "Herzenswunsch",
+        "Kinderlachen",
+        "Studentenausweis",
+        "Sonnenliege",
+        "Sternenflotte",
+        "Geburtstagsüberraschung",
+        "Lebensgeschichte",
+        "Bundesagenten",
+        "Hundegebell",
+        {
+          "word": "Adamskostüm",
+          "hidden": true
+        }
+      ]
+    },
+    {
+      "name": "compounds: umlauted and shortened first parts",
+      "words": [
+        "Häuserfassade",
+        "Mütterberatung",
+        "Gänsefeder",
+        "Gästeliste",
+        "Städtevergleich",
+        "Wörterliste",
+        "Hilfssheriff",
+        "Peilsender",
+        {
+          "word": "Sprachkenntnis",
+          "hidden": true
+        },
+        {
+          "word": "Kirchgänger",
+          "hidden": true
+        }
+      ]
+    },
+    {
+      "name": "compounds: choosing between analyses",
+      "words": [
+        "Wörterbuchsuche",
+        "Polizeisirene",
+        "Zeugenstand",
+        "Lagerhalle",
+        "Donaudampfschifffahrtsgesellschaft",
+        {
+          "word": "Kurznachricht",
+          "hidden": true
+        },
+        {
+          "word": "Rechenschieber",
+          "hidden": true
+        },
+        {
+          "word": "Deutschtümelei",
+          "hidden": true
+        },
+        {
+          "word": "Fußabstreifer",
+          "hidden": true
+        },
+        {
+          "word": "Schwagerehe",
+          "hidden": true
+        },
+        {
+          "word": "Gegenoffensive",
+          "hidden": true
+        },
+        {
+          "word": "Korallenotter",
+          "hidden": true
+        },
+        {
+          "word": "Bauernopfer",
+          "hidden": true
+        },
+        {
+          "word": "Klassenbewusstsein",
+          "hidden": true
+        },
+        {
+          "word": "Luxussteuer",
+          "hidden": true
+        }
+      ]
+    },
+    {
+      "name": "compounds: particles and three-letter parts",
+      "words": [
+        "hinbringen",
+        "hinschicken",
+        "hergeschickt",
+        "herbestellt",
+        "hergefahren",
+        "losgeht",
+        "rausgezogen",
+        "weitersuchen",
+        "Türglocke",
+        "Tatwaffe",
+        "Ehevertrag",
+        {
+          "word": "Vorionisation",
+          "hidden": true
+        },
+        {
+          "word": "Wegbeschreibung",
+          "hidden": true
+        },
+        {
+          "word": "Rotrückenmeise",
+          "hidden": true
+        }
+      ]
+    },
+    {
+      "name": "compounds: inflected and inferred tails",
+      "words": [
+        "Sicherheitsmaßnahmen",
+        "Superkräfte",
+        "Affengeräusche",
+        "spannungsgeladene",
+        "Vogelgezwitscher",
+        "außerbörsliche"
+      ]
+    },
+    {
+      "name": "inferred matches",
+      "words": [
+        "gehandeltes",
+        "gehandelte",
+        "börslich",
+        "gedownloadetes",
+        "Verlinkung",
+        "Absperrungen",
+        {
+          "word": "Kostbarkeit",
+          "hidden": true
+        },
+        {
+          "word": "Programmierung",
+          "hidden": true
+        }
+      ]
+    },
+    {
+      "name": "words that must not match",
+      "words": [
+        "understand",
+        "nothing",
+        "brother",
+        "Anderson",
+        "Peterson",
+        "Williams",
+        "herself",
+        "tonight",
+        "hundred",
+        "Minnesota",
+        "George",
+        "Xyzabcdefghijklmnopqrstuvwxyz"
+      ]
+    },
+    {
+      "name": "table metadata stored as forms by older dictionaries",
+      "words": [
+        "haben",
+        "strong",
+        "weak",
+        "sein"
+      ]
+    },
+    {
+      "name": "remaining tester page samples",
+      "words": [
+        "schreiben",
+        "Hausarbeit",
+        "Straßenbahn",
+        "Tageslicht",
+        "Hundeleine",
+        "Xyzzy"
+      ]
+    }
+  ],
+  "expect": {
+    "Haus": "[Haus] Haus(noun)",
+    "Hund": "[Hund] Hund(noun)",
+    "Straße": "[Straße] Straße(noun)",
+    "Börse": "[Börse] Börse(noun)",
+    "Wörterbuch": "[Wörterbuch] Wörterbuch(noun)",
+    "kaufen": "[kaufen] kaufen(verb)",
+    "laufen": "[laufen] laufen(verb)",
+    "sprechen": "[sprechen] sprechen(verb)",
+    "entwickeln": "[entwickeln] entwickeln(verb)",
+    "schön": "[schön] schön(adj)",
+    "sprachlich": "[sprachlich] sprachlich(adj)",
+    "strafbar": "[strafbar] strafbar(adj)",
+    "Häuser": "[Häuser] Haus(noun){plural}",
+    "Wörterbücher": "[Wörterbücher] Wörterbuch(noun){plural}",
+    "Straßen": "[Straßen] Straße(noun){plural}",
+    "gesprochen": "[gesprochen] sprechen(verb){participle,past}",
+    "gelaufen": "[gelaufen] laufen(verb){participle,past}",
+    "geschrieben": "[geschrieben] schreiben(verb){participle,past}",
+    "gefunden": "[gefunden] gefunden(adj) / finden(verb){participle,past}",
+    "gegangen": "[gegangen] gehen(verb){participle,past}",
+    "kleineres": "[kleineres] klein(adj){comparative,neuter,nominative,singular,strong}",
+    "entwickelte": "[entwickelte] entwickeln(verb){past} / entwickelt(adj){feminine,nominative,singular,strong}",
+    "angerufen": "[angerufen] anrufen(verb){participle,past}",
+    "aufzumachen": "[aufzumachen] aufmachen(verb){infinitive}",
+    "Sprachen": "[Sprachen] Sprache(noun){plural} / sprechen(verb){first-person,indicative,plural}",
+    "sprachen": "[sprachen] sprechen(verb){first-person,indicative,plural}",
+    "war": "[war] sein(verb){past}",
+    "besser": "[besser] gut(adj){comparative} / bessern(verb){first-person,indicative,present,singular}",
+    "das": "[das] der(art){neuter,nominative,singular} / den(pron){neuter,nominative,singular} / dass(conj)",
+    "wen": "[wen] wer(pron){accusative}",
+    "Thür": "[Thür] Tür(noun)",
+    "Neuigkeiten": "[Neuigkeiten] Neuigkeit(noun){plural}",
+    "hinge": "[hinge] hängen(verb){first-person,singular,subjunctive}",
+    "Todesursache": "[Todesursache] Todesursache(noun)",
+    "Beweismittel": "[Beweismittel] Beweismittel(noun)",
+    "Regler": "[Regler] Regler(noun)",
+    "Lehrerin": "[Lehrerin] Lehrerin(noun)",
+    "Häuschen": "[Häuschen] Häuschen(noun)",
+    "Berliner": "[Berliner] Berliner(noun) / berlinern(verb){first-person,indicative,present,singular}",
+    "Leben": "[Leben] Leben(noun) / leben(verb)",
+    "leben": "[leben] leben(verb) / Leben(noun)",
+    "Mensch": "[Mensch] Mensch(noun) / mensch(pron)",
+    "Bank": "[Bank] Bank(noun) / Bank(noun)",
+    "Banken": "[Banken] Bank(noun){plural}",
+    "Bänke": "[Bänke] Bank(noun){plural}",
+    "Essen": "[Essen] Essen(noun) / essen(verb)",
+    "essen": "[essen] essen(verb) / Essen(noun)",
+    "Morgen": "[Morgen] Morgen(noun) / morgen(adv)",
+    "morgen": "[morgen] morgen(adv) / Morgen(noun)",
+    "Weg": "[Weg] Weg(noun) / weg(adv)",
+    "weg": "[weg] weg(adv) / Weg(noun)",
+    "bitte": "[bitte] bitte(intj) / bitten(verb){first-person,indicative,present,singular} / Bitte(noun)",
+    "Bitte": "[Bitte] Bitte(noun) / bitte(intj) / bitten(verb){first-person,indicative,present,singular}",
+    "Lebens": "[Lebens] Leben(noun){genitive}",
+    "lebten": "[lebten] leben(verb){first-person,indicative,plural,past}",
+    "aßen": "[aßen] essen(verb){first-person,indicative,plural,past}",
+    "gefallen": "[gefallen] gefallen(verb) / fallen(verb){participle,past}",
+    "Karten": "[Karten] Karten(noun) / Karte(noun){plural}",
+    "früher": "[früher] früher(adj) / früh(adj){masculine,nominative,singular,strong}",
+    "später": "[später] später(adv) / spät(adj){masculine,nominative,singular,strong}",
+    "schönen": "[schönen] schönen(verb) / schön(adj){genitive,masculine,singular,strong}",
+    "wasser": "[wasser] wassern(verb){first-person,indicative,present,singular} / Wasser(noun)",
+    "Wasser": "[Wasser] Wasser(noun) / wassern(verb){first-person,indicative,present,singular}",
+    "Trainer": "[Trainer] Trainer(noun)",
+    "ich": "[ich] ich(pron)",
+    "dich": "[dich] du(pron){accusative,singular}",
+    "Frieden": "[Frieden] Frieden(noun)",
+    "fragen": "[fragen] fragen(verb)",
+    "Fragen": "[Fragen] Frage(noun){plural} / fragen(verb)",
+    "Liebe": "[Liebe] Liebe(noun) / lieben(verb){first-person,indicative,present,singular} / lieb(adj){feminine,nominative,singular,strong}",
+    "liebe": "[liebe] lieben(verb){first-person,indicative,present,singular} / lieb(adj){feminine,nominative,singular,strong} / Liebe(noun)",
+    "Schöne": "[Schöne] Schöne(noun) / schön(adj){feminine,nominative,singular,strong} / schönen(verb){first-person,indicative,present,singular}",
+    "lauf": "[lauf] laufen(verb){imperative,second-person,singular} / Lauf(noun)",
+    "Lauf": "[Lauf] Lauf(noun)",
+    "download": "[download] downloaden(verb){imperative,second-person,singular} / Download(noun)",
+    "Lauf (sentence-initial)": "[Lauf] Lauf(noun) / laufen(verb){imperative,second-person,singular}",
+    "Haus (sentence-initial)": "[Haus] Haus(noun) / hausen(verb){imperative,second-person,singular}",
+    "HAUS": "[HAUS] Haus(noun) / hausen(verb){imperative,second-person,singular}",
+    "Hochzeitsband": "[Hochzeits] Hochzeit(noun) || [band] Band(noun)",
+    "Hochzeitsgeschenk": "[Hochzeits] Hochzeit(noun) || [geschenk] Geschenk(noun)",
+    "Herzenswunsch": "[Herzens] Herz(noun) || [wunsch] Wunsch(noun)",
+    "Kinderlachen": "[Kinder] Kind(noun) || [lachen] lachen(verb)",
+    "Studentenausweis": "[Studenten] Student(noun) || [ausweis] Ausweis(noun)",
+    "Sonnenliege": "[Sonnen] Sonne(noun) || [liege] liegen(verb){first-person,indicative,present,singular}",
+    "Sternenflotte": "[Sternen] Stern(noun) || [flotte] Flotte(noun)",
+    "Geburtstagsüberraschung": "[Geburtstags] Geburtstag(noun) || [überraschung] Überraschung(noun)",
+    "Lebensgeschichte": "[Lebens] Leben(noun) || [geschichte] Geschichte(noun)",
+    "Bundesagenten": "[Bundes] Bund(noun) || [agenten] Agent(noun){genitive}",
+    "Hundegebell": "[Hunde] Hund(noun) || [gebell] Gebell(noun)",
+    "Adamskostüm (entry hidden)": "[Adams] Adam(name) || [kostüm] Kostüm(noun)",
+    "Häuserfassade": "[Häuser] Haus(noun) || [fassade] Fassade(noun)",
+    "Mütterberatung": "[Mütter] Mutter(noun) || [beratung] Beratung(noun)",
+    "Gänsefeder": "[Gänse] Gans(noun) || [feder] Feder(noun)",
+    "Gästeliste": "[Gäste] Gast(noun) || [liste] Liste(noun)",
+    "Städtevergleich": "[Städte] Stadt(noun) || [vergleich] Vergleich(noun)",
+    "Wörterliste": "[Wörter] Wort(noun) || [liste] Liste(noun)",
+    "Hilfssheriff": "[Hilfs] Hilfe(noun) || [sheriff] Sheriff(noun)",
+    "Peilsender": "[Peil] peilen(verb) || [sender] Sender(noun)",
+    "Sprachkenntnis (entry hidden)": "[Sprach] Sprache(noun) || [kenntnis] Kenntnis(noun)",
+    "Kirchgänger (entry hidden)": "[Kirch] Kirche(noun) || [gänger] Gänger(noun)",
+    "Wörterbuchsuche": "[Wörterbuch] Wörterbuch(noun) || [suche] Suche(noun)",
+    "Polizeisirene": "[Polizei] Polizei(noun) || [sirene] Sirene(noun)",
+    "Zeugenstand": "[Zeugen] Zeuge(noun) || [stand] Stand(noun)",
+    "Lagerhalle": "[Lager] Lager(noun) || [halle] Halle(noun)",
+    "Donaudampfschifffahrtsgesellschaft": "[Donau] Donau(name) || [dampfschifffahrts] Dampfschifffahrt(noun) || [gesellschaft] Gesellschaft(noun)",
+    "Kurznachricht (entry hidden)": "[Kurz] kurz(adj) || [nachricht] Nachricht(noun)",
+    "Rechenschieber (entry hidden)": "[Rechen] Rechen(noun) || [schieber] Schieber(noun)",
+    "Deutschtümelei (entry hidden)": "[Deutsch] deutsch(adj) || [tümelei] Tümelei(noun)",
+    "Fußabstreifer (entry hidden)": "[Fuß] Fuß(noun) || [abstreifer] abstreifen(verb)~",
+    "Schwagerehe (entry hidden)": "[Schwager] Schwager(noun) || [ehe] Ehe(noun)",
+    "Gegenoffensive (entry hidden)": "[Gegen] gegen(prep) || [offensive] Offensive(noun)",
+    "Korallenotter (entry hidden)": "[Korallen] Koralle(noun) || [otter] Otter(noun)",
+    "Bauernopfer (entry hidden)": "[Bauern] Bauer(noun) || [opfer] Opfer(noun)",
+    "Klassenbewusstsein (entry hidden)": "[Klassenbewusst] klassenbewusst(adj) || [sein] sein(verb)",
+    "Luxussteuer (entry hidden)": "[Luxus] Luxus(noun) || [steuer] Steuer(noun)",
+    "hinbringen": "[hin] hin(adv) || [bringen] bringen(verb)",
+    "hinschicken": "[hin] hin(adv) || [schicken] schicken(verb)",
+    "hergeschickt": "[her] her(adv) || [geschickt] schicken(verb){participle,past}",
+    "herbestellt": "[her] her(adv) || [bestellt] bestellen(verb){present,singular,third-person}",
+    "hergefahren": "[her] her(adv) || [gefahren] fahren(verb){participle,past}",
+    "losgeht": "[losgeht] losgehen(verb){indicative,plural,present,second-person}",
+    "rausgezogen": "[raus] raus(adv) || [gezogen] ziehen(verb){participle,past}",
+    "weitersuchen": "[weiter] weiter(adv) || [suchen] suchen(verb)",
+    "Türglocke": "[Tür] Tür(noun) || [glocke] Glocke(noun)",
+    "Tatwaffe": "[Tat] Tat(noun) || [waffe] Waffe(noun)",
+    "Ehevertrag": "[Ehe] Ehe(noun) || [vertrag] Vertrag(noun)",
+    "Vorionisation (entry hidden)": "[Vor] vor(prep) || [ionisation] Ionisation(noun)",
+    "Wegbeschreibung (entry hidden)": "[Weg] Weg(noun) / weg(adv) || [beschreibung] Beschreibung(noun)",
+    "Rotrückenmeise (entry hidden)": "[Rot] rot(adj) || [rücken] Rücken(noun) || [meise] Meise(noun)",
+    "Sicherheitsmaßnahmen": "[Sicherheits] Sicherheit(noun) || [maßnahmen] Maßnahme(noun){plural}",
+    "Superkräfte": "[Super] super(adj) || [kräfte] Kraft(noun){plural}",
+    "Affengeräusche": "[Affen] Affe(noun) || [geräusche] Geräusch(noun){plural}",
+    "spannungsgeladene": "[spannungs] Spannung(noun) || [geladene] geladen(adj){feminine,nominative,singular,strong}",
+    "Vogelgezwitscher": "[Vogel] Vogel(noun) || [gezwitscher] zwitschern(verb)~",
+    "außerbörsliche": "[außer] außer(prep) || [börsliche] börslich(adj)<Börse+-lich~",
+    "gehandeltes": "[gehandeltes] handeln(verb){participle,past}~",
+    "gehandelte": "[gehandelte] handeln(verb){participle,past}~",
+    "börslich": "[börslich] börslich(adj)<Börse+-lich~",
+    "gedownloadetes": "[gedownloadetes] downloaden(verb){participle,past}~",
+    "Verlinkung": "[Verlinkung] Verlinkung(noun)<verlinken+-ung~",
+    "Absperrungen": "[Absperrungen] Absperrung(noun)<absperren+-ung{plural}~ / Absperrung(noun)<Absperre+-ung{plural}~",
+    "Kostbarkeit (entry hidden)": "[Kostbarkeit] Kostbarkeit(noun)<kostbar+-keit~",
+    "Programmierung (entry hidden)": "[Programmierung] Programmierung(noun)<programmieren+-ung~",
+    "understand": "null",
+    "nothing": "null",
+    "brother": "null",
+    "Anderson": "null",
+    "Peterson": "null",
+    "Williams": "null",
+    "herself": "null",
+    "tonight": "null",
+    "hundred": "null",
+    "Minnesota": "null",
+    "George": "null",
+    "Xyzabcdefghijklmnopqrstuvwxyz": "null",
+    "haben": "[haben] haben(verb)",
+    "strong": "null",
+    "weak": "null",
+    "sein": "[sein] sein(verb)",
+    "schreiben": "[schreiben] schreiben(verb)",
+    "Hausarbeit": "[Hausarbeit] Hausarbeit(noun)",
+    "Straßenbahn": "[Straßenbahn] Straßenbahn(noun)",
+    "Tageslicht": "[Tageslicht] Tageslicht(noun)",
+    "Hundeleine": "[Hundeleine] Hundeleine(noun)",
+    "Xyzzy": "null"
+  }
+}

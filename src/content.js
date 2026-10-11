@@ -35,18 +35,24 @@
   };
 
   // ── State ────────────────────────────────────────────────────────────────
-  let settings    = { enabled: false, langCode: 'de', showIpa: true, showTags: true, showGender: true, maxSenses: 3 };
-  let currentWord = null;   // word string currently shown
+  const DEFAULT_SETTINGS = {
+    enabled: false, langCode: 'de', showIpa: true, showTags: true, showGender: true,
+    maxSenses: 3, keepOpen: false, showLeo: true,
+  };
+  let settings    = { ...DEFAULT_SETTINGS };
+  let currentWord = null;   // cache key (see cacheKey) of the word currently shown
   let hoverTimer  = null;
   let lastX = 0, lastY = 0;
+  let frozen      = false;  // Shift is held over a shown popup
 
   // Simple FIFO cache so we don't hit the background for the same word twice
   const CACHE_LIMIT = 300;
   const resultCache = new Map();
 
   // ── Shadow DOM setup ─────────────────────────────────────────────────────
-  // We create a host element and attach a closed shadow root so page styles
-  // cannot bleed in.  The host itself is styled to be non-intrusive.
+  // The popup lives in a shadow root so page styles cannot bleed in; the root
+  // is closed so page scripts cannot reach into it. The host itself is styled
+  // to be non-intrusive.
 
   const host = document.createElement('div');
   host.id = 'hoverleser-host';
@@ -143,6 +149,13 @@
       font-size: 13.5px;
     }
 
+    /* ── Derivation: the base a derived word was built from ── */
+    .hd-derivation {
+      padding: 2px 13px 0;
+      font-size: 12px;
+      color: #9a9a9a;
+    }
+
     /* ── Separator between entries ── */
     .hd-sep {
       border: none;
@@ -170,6 +183,11 @@
       text-transform: uppercase;
       white-space: nowrap;
     }
+    /* A match the dictionary does not record (entry.inferred) */
+    .hd-inferred {
+      border-style: dashed;
+      color: #b8a05a;
+    }
 
     /* ── Separator between compound segments ── */
     .hd-seg-sep {
@@ -180,11 +198,22 @@
 
     /* ── Footer ── */
     .hd-foot {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 12px;
       padding: 4px 13px 6px;
       font-size: 10px;
       color: #5a5a5a;
       border-top: 1px solid #2a2a2a;
     }
+    .hd-leo {
+      all: unset;
+      cursor: pointer;
+      font-size: 11px;
+      color: #7aa7d8;
+    }
+    .hd-leo:hover { text-decoration: underline; }
 
   `;
 
@@ -195,20 +224,15 @@
   const popup = document.createElement('div');
   popup.id = 'popup';
   shadow.appendChild(popup);
+  // Pages often close menus or start drags on mousedown anywhere; a press on
+  // the popup should not reach them.
+  popup.addEventListener('mousedown', e => e.stopPropagation());
 
   // ── Highlight overlay (lives on the page, not Shadow DOM) ────────────────
+  // Hidden until showHighlight gives it its position and appearance.
   const highlight = document.createElement('div');
   highlight.id = 'hoverleser-highlight';
-  highlight.style.cssText = [
-    'all: initial',
-    'position: absolute',
-    'z-index: 2147483644',
-    'background: rgba(147,197,253,0.18)',
-    'border-bottom: 2px solid rgba(147,197,253,0.6)',
-    'border-radius: 2px',
-    'pointer-events: none',
-    'display: none',
-  ].join(';');
+  highlight.style.cssText = 'all: initial; display: none';
 
   // ── Inject into / remove from DOM ───────────────────────────────────────
   function injectElements() {
@@ -253,11 +277,7 @@
   browser.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local' || !changes.settings) return;
     const wasEnabled = settings.enabled;
-    const next = Object.assign(
-      { enabled: false, langCode: 'de', showIpa: true,
-        showTags: true, showGender: true, maxSenses: 3 },
-      changes.settings.newValue ?? {}
-    );
+    const next = { ...DEFAULT_SETTINGS, ...(changes.settings.newValue ?? {}) };
     settings = next;
     if (settings.enabled && !wasEnabled) injectElements();
     if (!settings.enabled && wasEnabled) removeElements();
@@ -265,9 +285,24 @@
 
   // ── Word boundary detection ──────────────────────────────────────────────
 
+  // Characters that can stand between the end of one sentence and the first
+  // word of the next: spaces, quotes, brackets, and dashes.
+  const SENTENCE_GAP = /[\s"'„“”‚‘’«»‹›()[\]\u2013\u2014-]+$/;
+
   /**
-   * Returns { word, range } for the text token under (clientX, clientY),
-   * or null if not on a word.
+   * True when the word that starts at `start` may be the first word of a
+   * sentence, where German capitalizes every word, noun or not. A text node
+   * also begins after inline markup (a link, bold text), so the start of the
+   * node counts as a possible sentence start.
+   */
+  function startsSentence(text, start) {
+    const before = text.slice(0, start).replace(SENTENCE_GAP, '');
+    return before === '' || /[.!?:…]$/.test(before);
+  }
+
+  /**
+   * Returns { word, range, sentenceInitial } for the text token under
+   * (clientX, clientY), or null if not on a word.
    */
   function getWordAtPoint(clientX, clientY) {
     let node, offset;
@@ -320,7 +355,7 @@
     // Verify the cursor is actually over the word's bounding rect.
     // caretRangeFromPoint snaps to the nearest character even when the pointer
     // is in surrounding whitespace, causing premature triggering when approaching
-    // a word from the left or right. A small horizontal tolerance (2px) handles
+    // a word from the left or right. A small tolerance (2px) handles
     // sub-pixel rendering without re-introducing the early-trigger issue.
     const wordRect = range.getBoundingClientRect();
     const TOLERANCE = 2;
@@ -331,31 +366,38 @@
       clientY > wordRect.bottom + TOLERANCE
     ) return null;
 
-    return { word, range };
+    return { word, range, sentenceInitial: startsSentence(text, start) };
   }
 
   // ── Cache helpers ─────────────────────────────────────────────────────────
 
-  function cacheGet(word, langCode) {
-    return resultCache.get(`${langCode}:${word}`);
+  /**
+   * The position in the sentence changes the answer only for a capitalized
+   * word (see caseHint in background.js), so only then is it part of the key.
+   */
+  function cacheKey({ word, sentenceInitial }) {
+    const capitalized = word[0] !== word[0].toLowerCase();
+    return `${settings.langCode}:${sentenceInitial && capitalized ? '^' : ''}${word}`;
   }
 
-  function cacheSet(word, langCode, value) {
+  function cacheSet(key, value) {
     if (resultCache.size >= CACHE_LIMIT) {
       resultCache.delete(resultCache.keys().next().value);
     }
-    resultCache.set(`${langCode}:${word}`, value);
+    resultCache.set(key, value);
   }
 
   // ── Lookup ────────────────────────────────────────────────────────────────
 
-  async function lookup(word) {
-    const langCode = settings.langCode;
-    const cached   = cacheGet(word, langCode);
-    if (cached !== undefined) return cached;
-
-    const result = await browser.runtime.sendMessage({ type: 'lookup', word, langCode });
-    cacheSet(word, langCode, result ?? null);
+  async function lookup(wordInfo) {
+    const key = cacheKey(wordInfo);
+    const result = await browser.runtime.sendMessage({
+      type: 'lookup',
+      word: wordInfo.word,
+      langCode: settings.langCode,
+      sentenceInitial: wordInfo.sentenceInitial,
+    });
+    cacheSet(key, result ?? null);
     return result ?? null;
   }
 
@@ -377,6 +419,19 @@
     'first-person','second-person','third-person',
   ];
 
+  // Sense tags that describe the word as a whole (its inflection class, its
+  // valency, the form a stub stands for) and so belong in the tag row. Tags
+  // about a single meaning ("figuratively", "Austria", "usually") are left
+  // out: on the row they would read as true of every sense.
+  const ROW_SENSE_TAGS = new Set([
+    ...TAG_ORDER,
+    'preterite', 'subjunctive-i', 'subjunctive-ii', 'infinitive', 'gerund',
+    'irregular', 'class-1', 'class-2', 'class-3', 'class-4', 'class-5', 'class-6', 'class-7',
+    'reflexive', 'impersonal', 'ditransitive',
+    'not-comparable', 'indeclinable', 'no-plural', 'plural-only', 'uncountable',
+    'diminutive', 'definite', 'indefinite', 'cardinal', 'ordinal',
+  ]);
+
   /**
    * Minimal element builder. Everything below constructs DOM nodes rather than
    * HTML strings: dictionary glosses are third-party text, and building nodes
@@ -390,9 +445,13 @@
     return node;
   }
 
-  function buildTagRow(entry) {
-    // Merge gramTags (from form-of resolution) with relevant sense-level t-tags.
-    // Deduplicate and sort by TAG_ORDER; unlisted tags go at the end alphabetically.
+  /**
+   * The tag row for one entry: how the hovered word relates to the entry
+   * (gramTags), then word-level tags of the senses actually shown.
+   * Deduplicated and sorted by TAG_ORDER; unlisted tags go at the end
+   * alphabetically. An inferred entry leads with an "inferred" badge.
+   */
+  function buildTagRow(entry, shownSenses) {
     const seen = new Set();
     const merged = [];
 
@@ -403,18 +462,14 @@
       merged.push(lt);
     };
 
-    // gramTags first (they come from authoritative form_of data)
     for (const t of (entry.gramTags ?? [])) addTag(t);
-
-    // Sense-level t-tags: skip generic noise we don't want to badge
-    const T_NOISE = new Set(['form-of','canonical','error-unknown-tag','with-dative','with-accusative','with-genitive']);
-    for (const sense of (entry.s ?? [])) {
+    for (const sense of shownSenses) {
       for (const t of (sense.t ?? [])) {
-        if (!T_NOISE.has(t)) addTag(t);
+        if (ROW_SENSE_TAGS.has(t)) addTag(t);
       }
     }
 
-    if (merged.length === 0) return null;
+    if (merged.length === 0 && !entry.inferred) return null;
 
     const sorted = merged.sort((a, b) => {
       const ai = TAG_ORDER.indexOf(a);
@@ -426,6 +481,7 @@
     });
 
     const row = el('div', 'hd-tags-row');
+    if (entry.inferred) row.append(el('span', 'hd-gram-tag hd-inferred', 'inferred'));
     for (const t of sorted) row.append(el('span', 'hd-gram-tag', t));
     return row;
   }
@@ -445,28 +501,36 @@
     entries.forEach((entry, idx) => {
       if (idx > 0) frag.append(el('hr', 'hd-sep'));
 
-      const genderLabel = GENDER_LABELS[entry.g] ?? '';
-      const genderClass = GENDER_CLASS[entry.g]  ?? '';
+      // A derived word (börslich from Börse + -lich) is headed by itself; the
+      // senses, pronunciation, and sense tags below belong to its base.
+      const derived = entry.derivation;
+      const shown   = derived ? { w: derived.word, p: derived.p, g: derived.g } : entry;
+
+      const genderLabel = GENDER_LABELS[shown.g] ?? '';
+      const genderClass = GENDER_CLASS[shown.g]  ?? '';
       const head = el('div', 'hd-head');
-      head.append(el('span', 'hd-word', entry.w));
-      if (entry.g && settings.showGender !== false) {
+      head.append(el('span', 'hd-word', shown.w));
+      if (shown.g && settings.showGender !== false) {
         head.append(el('span', `hd-gender ${genderClass}`, genderLabel));
       }
-      head.append(el('span', 'hd-pos', entry.p ?? ''));
+      head.append(el('span', 'hd-pos', shown.p ?? ''));
       frag.append(head);
+
+      const senses = (Array.isArray(entry.s) ? entry.s : []).slice(0, budgets[idx]);
 
       // Unified, ordered tag row; one per entry, directly below the word header
       if (settings.showTags !== false) {
-        const tagRow = buildTagRow(entry);
+        const tagRow = buildTagRow(entry, derived ? [] : senses);
         if (tagRow) frag.append(tagRow);
       }
 
-      if (settings.showIpa && entry.i) {
+      if (derived) {
+        frag.append(el('div', 'hd-derivation', `from ${entry.w} + -${derived.suffix}`));
+      } else if (settings.showIpa && entry.i) {
         frag.append(el('div', 'hd-ipa', entry.i));
       }
-      if (Array.isArray(entry.s) && entry.s.length) {
+      if (senses.length) {
         const sensesBox = el('div', 'hd-senses');
-        const senses = entry.s.slice(0, budgets[idx]);
         senses.forEach((sense, i) => {
           const gloss = Array.isArray(sense.gl) ? sense.gl.join('; ') : String(sense);
           const row = el('div', 'hd-sense');
@@ -480,7 +544,8 @@
     return frag;
   }
 
-  function renderResult(lookupResult) {
+  /** @param {string} word  the hovered word, for the LEO button */
+  function renderResult(lookupResult, word) {
     const { segments } = lookupResult;
     const frag = document.createDocumentFragment();
 
@@ -492,7 +557,22 @@
       frag.append(renderEntries(seg.entries));
     });
 
-    frag.append(el('div', 'hd-foot', 'Wiktionary · CC BY-SA'));
+    const foot = el('div', 'hd-foot');
+    foot.append(el('span', null, 'Wiktionary · CC BY-SA'));
+    if (settings.showLeo !== false) {
+      // Opens LEO's own result page for the whole hovered word in a new tab.
+      // Clickable only while the popup takes the pointer: Shift held, or keepOpen.
+      const leo = el('button', 'hd-leo', 'Look up on LEO ↗');
+      leo.type = 'button';
+      leo.addEventListener('click', e => {
+        e.preventDefault();
+        e.stopPropagation();
+        browser.runtime.sendMessage({ type: 'open-leo', word }).catch(() => {});
+        clear();
+      });
+      foot.append(leo);
+    }
+    frag.append(foot);
     popup.replaceChildren(frag);
     popup.style.display = 'block';
   }
@@ -522,6 +602,38 @@
     popup.style.top  = `${y}px`;
   }
 
+  /**
+   * Place the popup directly against the word, below it or else above, so the
+   * pointer can move from the word onto the popup without crossing the page.
+   */
+  function placePopupAtWord(rect) {
+    const PAD = 12;
+    popup.style.left = '0';
+    popup.style.top  = '0';
+    popup.style.display = 'block';
+
+    const pw = popup.offsetWidth;
+    const ph = popup.offsetHeight;
+
+    let y = rect.bottom;
+    if (y + ph > window.innerHeight - PAD) y = rect.top - ph;
+    const x = Math.min(rect.left, window.innerWidth - pw - PAD);
+
+    popup.style.left = `${Math.max(PAD, x)}px`;
+    popup.style.top  = `${Math.max(PAD, y)}px`;
+  }
+
+  /**
+   * Show the rendered popup for a word. By default it follows the cursor and
+   * ignores the pointer. With keepOpen it sits against the word and takes the
+   * pointer, so it can be moved onto and clicked.
+   */
+  function showPopup(rect) {
+    if (settings.keepOpen) placePopupAtWord(rect);
+    else placePopup(lastX, lastY);
+    popup.style.pointerEvents = settings.keepOpen ? 'auto' : '';
+  }
+
   // ── Highlight ─────────────────────────────────────────────────────────────
 
   function showHighlight(rect) {
@@ -547,8 +659,40 @@
   function clear() {
     clearTimeout(hoverTimer);
     popup.style.display    = 'none';
+    popup.style.pointerEvents = '';
     highlight.style.display = 'none';
     currentWord = null;
+    frozen = false;
+  }
+
+  /**
+   * Holding Shift freezes a shown popup where it is and lets it take the
+   * pointer, so it can be reached from any direction and clicked.
+   */
+  function freeze() {
+    frozen = true;
+    popup.style.pointerEvents = 'auto';
+  }
+
+  /**
+   * End a freeze. Without keepOpen the popup goes back to ignoring the pointer
+   * and closes unless the pointer is still on the word. Returns true if it
+   * closed.
+   */
+  function unfreeze() {
+    frozen = false;
+    popup.style.pointerEvents = settings.keepOpen ? 'auto' : '';
+    if (settings.keepOpen || !awayFromWord(lastX, lastY)) return false;
+    clear();
+    return true;
+  }
+
+  /** True when (x, y) is outside the highlighted word, with a small margin. */
+  function awayFromWord(x, y) {
+    const hr = highlight.getBoundingClientRect();
+    const MARGIN = 6;
+    return x < hr.left - MARGIN || x > hr.right + MARGIN ||
+           y < hr.top  - MARGIN || y > hr.bottom + MARGIN;
   }
 
   // ── Mouse event handlers ──────────────────────────────────────────────────
@@ -565,20 +709,22 @@
 
     clearTimeout(hoverTimer);
 
+    const popupShown = popup.style.display === 'block';
+    if (e.shiftKey && popupShown) {
+      freeze();
+      return;
+    }
+    if (frozen && unfreeze()) return;
+
+    // The pointer is on the popup itself, which only happens while the popup
+    // takes the pointer: keep it open.
+    if (e.target === host) return;
+
     // Fast-clear if pointer is provably outside the current highlight rect;
     // no need to wait for getWordAtPoint when we can dismiss immediately.
-    if (currentWord && highlight.style.display !== 'none') {
-      const hr = highlight.getBoundingClientRect();
-      const MARGIN = 6;
-      if (
-        e.clientX < hr.left   - MARGIN ||
-        e.clientX > hr.right  + MARGIN ||
-        e.clientY < hr.top    - MARGIN ||
-        e.clientY > hr.bottom + MARGIN
-      ) {
-        clear();
-        return;
-      }
+    if (currentWord && highlight.style.display !== 'none' && awayFromWord(e.clientX, e.clientY)) {
+      clear();
+      return;
     }
 
     const wordInfo = getWordAtPoint(e.clientX, e.clientY);
@@ -589,13 +735,15 @@
       return;
     }
 
-    // Same word: just reposition the popup if it's visible
-    if (wordInfo.word === currentWord) {
-      if (popup.style.display === 'block') placePopup(lastX, lastY);
+    // Same word: a cursor-following popup follows; one placed against the
+    // word stays put
+    const key = cacheKey(wordInfo);
+    if (key === currentWord) {
+      if (popupShown && !settings.keepOpen) placePopup(lastX, lastY);
       return;
     }
 
-    currentWord = wordInfo.word;
+    currentWord = key;
 
     // Capture range rect now (valid while we still have the range object)
     const rect = wordInfo.range.getBoundingClientRect();
@@ -603,32 +751,30 @@
     // Fire lookup immediately; IndexedDB is local so results come back fast.
     // We intentionally do NOT show highlight or popup until a result is found:
     // that way only words that exist in the chosen language's dictionary are
-    // ever highlighted, matching 10ten's behaviour.
+    // ever highlighted, matching 10ten's behavior.
     (async () => {
-      const word = wordInfo.word;
-
       // Cache hit: synchronous path, no flicker
-      const cached = cacheGet(word, settings.langCode);
+      const cached = resultCache.get(key);
       if (cached !== undefined) {
-        if (currentWord !== word || !settings.enabled) return;
+        if (currentWord !== key || !settings.enabled) return;
         if (cached) {
           if (rect.width > 0) showHighlight(rect);
-          renderResult(cached);
-          placePopup(lastX, lastY);
+          renderResult(cached, wordInfo.word);
+          showPopup(rect);
         }
         // null cache entry = known miss, show nothing
         return;
       }
 
       // DB lookup (local IndexedDB, typically <5 ms)
-      const result = await lookup(word);
+      const result = await lookup(wordInfo);
       // Guard: word changed or extension was disabled while awaiting
-      if (currentWord !== word || !settings.enabled) return;
+      if (currentWord !== key || !settings.enabled) return;
 
       if (result) {
         if (rect.width > 0) showHighlight(rect);
-        renderResult(result);
-        placePopup(lastX, lastY);
+        renderResult(result, wordInfo.word);
+        showPopup(rect);
       }
       // No result = not in dictionary, show nothing (no highlight)
     })();
@@ -638,8 +784,14 @@
 
   document.addEventListener('scroll', () => { clear(); }, { passive: true, capture: true });
 
+  // Shift takes effect on press and release, not only on the next mousemove.
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') clear();
+    else if (e.key === 'Shift' && popup.style.display === 'block') freeze();
+  });
+
+  document.addEventListener('keyup', e => {
+    if (e.key === 'Shift' && frozen) unfreeze();
   });
 
 })();

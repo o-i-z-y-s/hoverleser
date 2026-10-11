@@ -17,6 +17,8 @@ const toggleEnabled = document.getElementById('toggle-enabled');
 const toggleIpa     = document.getElementById('toggle-ipa');
 const toggleTags    = document.getElementById('toggle-tags');
 const toggleGender  = document.getElementById('toggle-gender');
+const toggleKeepOpen = document.getElementById('toggle-keep-open');
+const toggleLeo     = document.getElementById('toggle-leo');
 const segSenses     = document.getElementById('seg-senses');
 const popupOpenTabLink = document.getElementById('popup-open-tab-link');
 const statusDot     = document.getElementById('status-dot');
@@ -32,7 +34,10 @@ const btnClear      = document.getElementById('btn-clear');
 const importMsg     = document.getElementById('import-msg');
 const btnOpenTab    = document.getElementById('btn-open-tab');
 
-let settings = { enabled: false, langCode: LANG_CODE, showIpa: true, showTags: true, showGender: true, maxSenses: 3 };
+let settings = {
+  enabled: false, langCode: LANG_CODE, showIpa: true, showTags: true, showGender: true,
+  maxSenses: 3, keepOpen: false, showLeo: true,
+};
 let pollTimer = null;
 
 // ── Init ──────────────────────────────────────────────────────────────────
@@ -44,6 +49,8 @@ async function init() {
   toggleIpa.checked     = settings.showIpa;
   toggleTags.checked    = settings.showTags   ?? true;
   toggleGender.checked  = settings.showGender ?? true;
+  toggleKeepOpen.checked = settings.keepOpen ?? false;
+  toggleLeo.checked     = settings.showLeo   ?? true;
   // Activate correct segment button
   const activeSeg = segSenses.querySelector(`[data-val="${settings.maxSenses ?? 3}"]`);
   if (activeSeg) {
@@ -118,7 +125,7 @@ async function refreshDbStatus() {
 
 function setButtons({ importDisabled, clearDisabled }) {
   btnImport.disabled               = importDisabled;
-  importDisabled ? dropZone.classList.add('dz-hidden') : dropZone.classList.remove('dz-hidden');
+  dropZone.classList.toggle('dz-hidden', importDisabled);
   dropZone.setAttribute('tabindex', importDisabled ? '-1' : '0');
   fileInput.disabled               = importDisabled;
   btnClear.disabled                = clearDisabled;
@@ -253,7 +260,7 @@ async function importFile(file) {
     }
 
     await browser.runtime.sendMessage({
-      type: 'import-file-start', langCode: LANG_CODE, lang: LANG_NAME, totalSize: total,
+      type: 'import-file-start', langCode: LANG_CODE, lang: LANG_NAME, totalEntries: total,
     });
 
     // Start polling; status dot + entry counter now drive the UI
@@ -332,6 +339,12 @@ toggleTags.addEventListener('change', () => {
 toggleGender.addEventListener('change', () => {
   settings.showGender = toggleGender.checked; saveSettings();
 });
+toggleKeepOpen.addEventListener('change', () => {
+  settings.keepOpen = toggleKeepOpen.checked; saveSettings();
+});
+toggleLeo.addEventListener('change', () => {
+  settings.showLeo = toggleLeo.checked; saveSettings();
+});
 segSenses.addEventListener('click', e => {
   const btn = e.target.closest('button[data-val]');
   if (!btn) return;
@@ -347,8 +360,9 @@ btnOpenTab.addEventListener('click', openTab);
 if (popupOpenTabLink) popupOpenTabLink.addEventListener('click', openTab);
 
 // ── Sample words panel ──────────────────────────────────────────────────────
-// Renders lookup results inline when hovering .sample-word spans.
-// Mirrors content.js rendering using sr-* class names (no Shadow DOM needed).
+// Shows lookup results for the .sample-word spans on hover, and for a word
+// typed into #sample-input. Mirrors content.js rendering using sr-* class
+// names (no Shadow DOM needed); keep the two in step.
 
 const SR_GENDER_LABELS = { m: 'der', f: 'die', n: 'das' };
 const SR_GENDER_CLASS  = { m: 'sr-gender-m', f: 'sr-gender-f', n: 'sr-gender-n' };
@@ -359,9 +373,14 @@ const SR_TAG_ORDER = [
   'past','present','future','indicative','subjunctive','imperative','participle',
   'first-person','second-person','third-person',
 ];
-const SR_TAG_NOISE = new Set([
-  'form-of','canonical','error-unknown-tag',
-  'with-dative','with-accusative','with-genitive',
+// Sense tags that belong in the tag row; see ROW_SENSE_TAGS in content.js.
+const SR_ROW_SENSE_TAGS = new Set([
+  ...SR_TAG_ORDER,
+  'preterite', 'subjunctive-i', 'subjunctive-ii', 'infinitive', 'gerund',
+  'irregular', 'class-1', 'class-2', 'class-3', 'class-4', 'class-5', 'class-6', 'class-7',
+  'reflexive', 'impersonal', 'ditransitive',
+  'not-comparable', 'indeclinable', 'no-plural', 'plural-only', 'uncountable',
+  'diminutive', 'definite', 'indefinite', 'cardinal', 'ordinal',
 ]);
 
 /**
@@ -377,7 +396,7 @@ function srEl(tag, className, text) {
   return node;
 }
 
-function buildSrTagRow(entry) {
+function buildSrTagRow(entry, shownSenses) {
   const seen = new Set();
   const merged = [];
   const add = t => {
@@ -386,10 +405,10 @@ function buildSrTagRow(entry) {
     seen.add(lt); merged.push(lt);
   };
   for (const t of (entry.gramTags ?? [])) add(t);
-  for (const sense of (entry.s ?? []))
+  for (const sense of shownSenses)
     for (const t of (sense.t ?? []))
-      if (!SR_TAG_NOISE.has(t)) add(t);
-  if (merged.length === 0) return null;
+      if (SR_ROW_SENSE_TAGS.has(t)) add(t);
+  if (merged.length === 0 && !entry.inferred) return null;
   const sorted = merged.sort((a, b) => {
     const ai = SR_TAG_ORDER.indexOf(a), bi = SR_TAG_ORDER.indexOf(b);
     if (ai !== -1 && bi !== -1) return ai - bi;
@@ -397,6 +416,7 @@ function buildSrTagRow(entry) {
     return a.localeCompare(b);
   });
   const row = srEl('div', 'sr-tags-row');
+  if (entry.inferred) row.append(srEl('span', 'sr-gram-tag sr-inferred', 'inferred'));
   for (const t of sorted) row.append(srEl('span', 'sr-gram-tag', t));
   return row;
 }
@@ -411,24 +431,28 @@ function renderSrEntries(entries) {
 
   entries.forEach((entry, idx) => {
     if (idx > 0) frag.append(srEl('hr', 'sr-sep'));
-    const gc = SR_GENDER_CLASS[entry.g]  ?? '';
-    const gl = SR_GENDER_LABELS[entry.g] ?? '';
+    // A derived word is headed by itself; see renderEntries in content.js.
+    const derived = entry.derivation;
+    const shown   = derived ? { w: derived.word, p: derived.p, g: derived.g } : entry;
+    const gc = SR_GENDER_CLASS[shown.g]  ?? '';
+    const gl = SR_GENDER_LABELS[shown.g] ?? '';
     const head = srEl('div', 'sr-head');
-    head.append(srEl('span', 'sr-word', entry.w));
-    if (entry.g && settings.showGender !== false) {
+    head.append(srEl('span', 'sr-word', shown.w));
+    if (shown.g && settings.showGender !== false) {
       head.append(srEl('span', `sr-gender ${gc}`, gl));
     }
-    head.append(srEl('span', 'sr-pos', entry.p ?? ''));
+    head.append(srEl('span', 'sr-pos', shown.p ?? ''));
     frag.append(head);
 
+    const senses = (Array.isArray(entry.s) ? entry.s : []).slice(0, budgets[idx]);
     if (settings.showTags !== false) {
-      const tagRow = buildSrTagRow(entry);
+      const tagRow = buildSrTagRow(entry, derived ? [] : senses);
       if (tagRow) frag.append(tagRow);
     }
-    if (settings.showIpa && entry.i) frag.append(srEl('div', 'sr-ipa', entry.i));
-    if (Array.isArray(entry.s) && entry.s.length) {
+    if (derived) frag.append(srEl('div', 'sr-derivation', `from ${entry.w} + -${derived.suffix}`));
+    else if (settings.showIpa && entry.i) frag.append(srEl('div', 'sr-ipa', entry.i));
+    if (senses.length) {
       const sensesBox = srEl('div', 'sr-senses');
-      const senses = entry.s.slice(0, budgets[idx]);
       senses.forEach((sense, i) => {
         const gloss = Array.isArray(sense.gl) ? sense.gl.join('; ') : String(sense);
         const row = srEl('div', 'sr-sense');
@@ -442,13 +466,24 @@ function renderSrEntries(entries) {
   return frag;
 }
 
-function renderSrResult(result) {
+/** @param {string} word  the looked-up word, for the LEO button */
+function renderSrResult(result, word) {
   const frag = document.createDocumentFragment();
   result.segments.forEach((seg, si) => {
     if (si > 0) frag.append(srEl('hr', 'sr-seg-sep'));
     frag.append(renderSrEntries(seg.entries));
   });
-  frag.append(srEl('div', 'sr-foot', 'Wiktionary · CC BY-SA'));
+  const foot = srEl('div', 'sr-foot');
+  foot.append(srEl('span', null, 'Wiktionary · CC BY-SA'));
+  if (settings.showLeo !== false) {
+    const leo = srEl('button', 'sr-leo', 'Look up on LEO ↗');
+    leo.type = 'button';
+    leo.addEventListener('click', () => {
+      browser.runtime.sendMessage({ type: 'open-leo', word }).catch(() => {});
+    });
+    foot.append(leo);
+  }
+  frag.append(foot);
   return frag;
 }
 
@@ -474,18 +509,43 @@ function initSamplePanel() {
     resultDiv.style.top  = Math.max(SR_PAD, y) + 'px';
   }
 
+  // Mirror content.js placePopupAtWord: directly below the word, else above.
+  function placeUnderWord(span) {
+    const r = span.getBoundingClientRect();
+    resultDiv.style.left = '0';
+    resultDiv.style.top  = '0';
+    const pw = resultDiv.offsetWidth;
+    const ph = resultDiv.offsetHeight;
+    let y = r.bottom;
+    if (y + ph > window.innerHeight - SR_PAD) y = r.top - ph;
+    const x = Math.min(r.left, window.innerWidth - pw - SR_PAD);
+    resultDiv.style.left = Math.max(SR_PAD, x) + 'px';
+    resultDiv.style.top  = Math.max(SR_PAD, y) + 'px';
+  }
+
+  // As on a page: holding Shift freezes the card, and with "Keep popup open"
+  // it sits under the word instead of following the cursor.
+  let frozen = false;
+  const shown = () => resultDiv.style.display === 'block';
+  const keepOpen = () => toggleKeepOpen.checked;
+  document.addEventListener('keydown', e => { if (e.key === 'Shift' && shown()) frozen = true; });
+  document.addEventListener('keyup',   e => { if (e.key === 'Shift') frozen = false; });
+
   document.querySelectorAll('.sample-word').forEach(span => {
+    const place = e => keepOpen() ? placeUnderWord(span) : placeSampleResult(e.clientX, e.clientY);
+
     span.addEventListener('mouseenter', async e => {
+      if (frozen || (e.shiftKey && shown())) return;
       const word = span.textContent.trim();
       resultDiv.style.display = 'block';
-      placeSampleResult(e.clientX, e.clientY);
+      place(e);
 
       try {
         const result = await browser.runtime.sendMessage({
           type: 'lookup', word, langCode: LANG_CODE,
         });
         if (result) {
-          resultDiv.replaceChildren(renderSrResult(result));
+          resultDiv.replaceChildren(renderSrResult(result, word));
         } else {
           resultDiv.replaceChildren(
             srEl('span', 'sr-miss', `Not found in dictionary: ${word}`),
@@ -496,16 +556,39 @@ function initSamplePanel() {
           srEl('span', 'sr-miss', `Lookup error: ${err.message}`),
         );
       }
-      placeSampleResult(e.clientX, e.clientY);
+      if (!frozen) place(e);
     });
 
     span.addEventListener('mousemove', e => {
-      if (resultDiv.style.display === 'block') placeSampleResult(e.clientX, e.clientY);
+      if (e.shiftKey && shown()) frozen = true;
+      if (shown() && !frozen && !keepOpen()) placeSampleResult(e.clientX, e.clientY);
     });
   });
 
   document.getElementById('sample-panel').addEventListener('mouseleave', () => {
     resultDiv.style.display = 'none';
+  });
+
+  // Free-text lookup: the result of the last word typed stays on the page.
+  const input = document.getElementById('sample-input');
+  const typedDiv = document.getElementById('sample-typed-result');
+  if (!input || !typedDiv) return;
+  let latest = 0;
+  input.addEventListener('input', async () => {
+    const word = input.value.trim();
+    const request = ++latest;
+    if (!word) { typedDiv.replaceChildren(); return; }
+    let content;
+    try {
+      const result = await browser.runtime.sendMessage({ type: 'lookup', word, langCode: LANG_CODE });
+      content = result
+        ? renderSrResult(result, word)
+        : srEl('span', 'sr-miss', `Not found in dictionary: ${word}`);
+    } catch (err) {
+      content = srEl('span', 'sr-miss', `Lookup error: ${err.message}`);
+    }
+    // A slower answer for an earlier keystroke must not replace a newer one.
+    if (request === latest) typedDiv.replaceChildren(content);
   });
 }
 
