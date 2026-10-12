@@ -69,6 +69,19 @@ test('a derived word is described as itself, built on its base', async () => {
   assert.deepEqual([...noun.gramTags], ['plural']);
 });
 
+test('a word the dictionary derives from another is headed by itself, not guessed', async () => {
+  const [entry] = await entriesOf('Kindlein');
+  assert.equal(entry.w, 'Kind');
+  assert.deepEqual({ ...entry.derivation }, { word: 'Kindlein', p: 'noun', g: 'n', relation: 'diminutive' });
+  assert.equal(entry.inferred, undefined);
+});
+
+test('capitalization decides between a noun compound and a derived adjective', async () => {
+  assert.equal((await harness.lookup('Unehrenhaft')).segments.length, 2);
+  const [adjective] = await entriesOf('unehrenhaft');
+  assert.deepEqual([adjective.derivation.word, adjective.derivation.p], ['unehrenhaft', 'adj']);
+});
+
 test('a guessed match is flagged and carries only tags the affixes prove', async () => {
   const [entry] = await entriesOf('gehandeltes');
   assert.equal(entry.inferred, true);

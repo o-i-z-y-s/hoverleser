@@ -72,6 +72,7 @@
 
   // ── Popup template ───────────────────────────────────────────────────────
   const POPUP_CSS = `
+    ${hoverleserTheme.css('#popup')}
     :host { all: initial; }
 
     #popup {
@@ -83,11 +84,11 @@
       line-height: 1.5;
       max-width: 360px;
       min-width: 180px;
-      background: #1e1e1e;
-      color: #d4d4d4;
-      border: 1px solid #333;
+      background: var(--gray-2);
+      color: var(--gray-17);
+      border: 1px solid var(--gray-7);
       border-radius: 10px;
-      box-shadow: 0 8px 32px rgba(0,0,0,0.7), 0 2px 8px rgba(0,0,0,0.4);
+      box-shadow: 0 8px 32px var(--shadow-strong), 0 2px 8px var(--shadow-soft);
       overflow: hidden;
       pointer-events: none;
       animation: hd-in 0.12s ease;
@@ -100,8 +101,8 @@
     /* ── Header ── */
     .hd-head {
       padding: 9px 13px 7px;
-      background: #181818;
-      border-bottom: 1px solid #2e2e2e;
+      background: var(--gray-1);
+      border-bottom: 1px solid var(--gray-6);
       display: flex;
       align-items: baseline;
       gap: 8px;
@@ -109,12 +110,12 @@
     .hd-word {
       font-size: 19px;
       font-weight: 700;
-      color: #f0f0f0;
+      color: var(--gray-18);
       letter-spacing: 0.2px;
     }
     .hd-pos {
       font-size: 11px;
-      color: #777;
+      color: var(--gray-12);
       font-style: italic;
     }
     .hd-gender {
@@ -123,28 +124,28 @@
       padding: 1px 5px;
       border-radius: 4px;
     }
-    .hd-gender-m { background:#1e2e3d; color:#82b4e0; }
-    .hd-gender-f { background:#3a1a28; color:#e8a0bc; }
-    .hd-gender-n { background:#1a2a1a; color:#88d8a0; }
+    .hd-gender-m { background:var(--gender-m-bg); color:var(--gender-m); }
+    .hd-gender-f { background:var(--gender-f-bg); color:var(--gender-f); }
+    .hd-gender-n { background:var(--gender-n-bg); color:var(--gender-n); }
 
     /* ── IPA ── */
     .hd-ipa {
       padding: 3px 13px 0;
       font-size: 11px;
-      color: #777;
+      color: var(--gray-12);
       font-family: monospace;
-      border-bottom: 1px solid #282828;
+      border-bottom: 1px solid var(--gray-5);
     }
 
     /* ── Senses ── */
     .hd-senses { padding: 6px 0 8px; }
     .hd-sense  { display: flex; padding: 3px 13px; gap: 9px; }
     .hd-sense-num {
-      flex-shrink: 0; font-size: 10px; color: #666;
+      flex-shrink: 0; font-size: 10px; color: var(--gray-11);
       margin-top: 3px; min-width: 14px; text-align: right;
     }
     .hd-gloss {
-      color: #a8d880;
+      color: var(--gloss);
       font-weight: 500;
       font-size: 13.5px;
     }
@@ -153,13 +154,13 @@
     .hd-derivation {
       padding: 2px 13px 0;
       font-size: 12px;
-      color: #9a9a9a;
+      color: var(--gray-14);
     }
 
     /* ── Separator between entries ── */
     .hd-sep {
       border: none;
-      border-top: 1px solid #282828;
+      border-top: 1px solid var(--gray-5);
       margin: 4px 0;
     }
 
@@ -172,9 +173,9 @@
     }
     .hd-gram-tag {
       display: inline-block;
-      background: #2a2a2a;
-      color: #888;
-      border: 1px solid #3a3a3a;
+      background: var(--gray-5);
+      color: var(--gray-13);
+      border: 1px solid var(--gray-8);
       border-radius: 3px;
       font-size: 9px;
       font-weight: 600;
@@ -186,13 +187,13 @@
     /* A match the dictionary does not record (entry.inferred) */
     .hd-inferred {
       border-style: dashed;
-      color: #b8a05a;
+      color: var(--inferred);
     }
 
     /* ── Separator between compound segments ── */
     .hd-seg-sep {
       border: none;
-      border-top: 2px solid #333;
+      border-top: 2px solid var(--gray-7);
       margin: 6px 0;
     }
 
@@ -204,14 +205,14 @@
       gap: 12px;
       padding: 4px 13px 6px;
       font-size: 10px;
-      color: #5a5a5a;
-      border-top: 1px solid #2a2a2a;
+      color: var(--gray-10);
+      border-top: 1px solid var(--gray-5);
     }
     .hd-leo {
       all: unset;
       cursor: pointer;
       font-size: 11px;
-      color: #7aa7d8;
+      color: var(--link);
     }
     .hd-leo:hover { text-decoration: underline; }
 
@@ -261,24 +262,12 @@
     })
     .catch(() => {});
 
-  browser.runtime.onMessage.addListener(msg => {
-    if (msg.type === 'settings-changed') {
-      const wasEnabled = settings.enabled;
-      settings = msg.settings;
-      if (settings.enabled && !wasEnabled) injectElements();
-      if (!settings.enabled && wasEnabled) removeElements();
-    }
-  });
-
-  // Fast-path settings sync: react to storage writes directly so the update
-  // is visible before popup.js finishes its tab-query + broadcast loop.
-  // This closes the timing window where a mousemove between toggle-click and
-  // message delivery can show the popup for a shared EN/DE word (Motor, Job…).
+  // Every settings change is a write to storage, which reaches the content
+  // script in every tab and frame.
   browser.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local' || !changes.settings) return;
     const wasEnabled = settings.enabled;
-    const next = { ...DEFAULT_SETTINGS, ...(changes.settings.newValue ?? {}) };
-    settings = next;
+    settings = { ...DEFAULT_SETTINGS, ...(changes.settings.newValue ?? {}) };
     if (settings.enabled && !wasEnabled) injectElements();
     if (!settings.enabled && wasEnabled) removeElements();
   });
@@ -486,6 +475,12 @@
     return row;
   }
 
+  /** "from Börse + -lich", or "diminutive of Kind" for a dictionary relation. */
+  function derivationText(entry) {
+    const { suffix, relation } = entry.derivation;
+    return suffix ? `from ${entry.w} + -${suffix}` : `${relation} of ${entry.w}`;
+  }
+
   function renderEntries(entries) {
     const frag = document.createDocumentFragment();
     // Distribute sense budget across all POS entries in this segment.
@@ -525,7 +520,7 @@
       }
 
       if (derived) {
-        frag.append(el('div', 'hd-derivation', `from ${entry.w} + -${derived.suffix}`));
+        frag.append(el('div', 'hd-derivation', derivationText(entry)));
       } else if (settings.showIpa && entry.i) {
         frag.append(el('div', 'hd-ipa', entry.i));
       }
@@ -642,8 +637,8 @@
       'all: initial',
       'position: absolute',
       'z-index: 2147483644',
-      'background: rgba(200,200,200,0.10)',
-      'border-bottom: 2px solid rgba(168,216,128,0.7)',
+      `background: ${hoverleserTheme.colors['word-highlight']}`,
+      `border-bottom: 2px solid color-mix(in srgb, ${hoverleserTheme.colors.gloss} 70%, transparent)`,
       'border-radius: 2px',
       'pointer-events: none',
       `left: ${rect.left + sx}px`,

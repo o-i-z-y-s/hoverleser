@@ -1,5 +1,5 @@
 {
-  "note": "Regression cases for the word lookup. A case is a word, or { word, sentenceInitial, hidden } (see lookup() in tests/harness.js). Each value under \"expect\" is the output of summarize(): [text covered] Word(part of speech){tags}, with \"~\" after an inferred match, \"word(class)<base+-suffix\" for a derived word, \"/\" between readings, and \"||\" between compound parts. Regenerate the expectations and the mini dictionary with: node tests/make-fixture.js --dict <full dictionary> --update",
+  "note": "Regression cases for the word lookup. A case is a word, or { word, sentenceInitial, hidden } (see lookup() in tests/harness.js). Each value under \"expect\" is the output of summarize(): [text covered] Word(part of speech){tags}, with \"~\" after an inferred match, \"word(class)<base+-suffix\" for a derived word, \"word(class)<relation of base\" for one the dictionary relates to its base, \"/\" between readings, and \"||\" between compound parts. Regenerate the expectations and the mini dictionary with: node tests/make-fixture.js --dict <full dictionary> --update",
   "groups": [
     {
       "name": "plain entries",
@@ -305,6 +305,65 @@
         "Hundeleine",
         "Xyzzy"
       ]
+    },
+    {
+      "name": "derived words",
+      "words": [
+        "Forensiker",
+        "Forensikerin",
+        "Aufpasser",
+        {
+          "word": "Totschläger",
+          "hidden": true
+        },
+        "Kolonisten",
+        {
+          "word": "Optometrist",
+          "hidden": true
+        },
+        {
+          "word": "Schmetterling",
+          "hidden": true
+        },
+        {
+          "word": "Schwärmerei",
+          "hidden": true
+        },
+        "Kindlein",
+        "Kindleins",
+        "Freundin",
+        "Händchen",
+        "Verwarnung",
+        {
+          "word": "Fahrlässigkeit",
+          "hidden": true
+        },
+        "durchschaubar",
+        "unehrenhaft",
+        "Tausender",
+        "ziemliche",
+        "stinkende",
+        "versuchter",
+        "organisiertes"
+      ]
+    },
+    {
+      "name": "derivation or compound",
+      "words": [
+        "Gesundheitsamt",
+        "Spieltisch",
+        "Unehrenhaft",
+        {
+          "word": "Literaturkritiker",
+          "hidden": true
+        },
+        {
+          "word": "Grundbesitzer",
+          "hidden": true
+        },
+        "Merlin",
+        "Sterling"
+      ]
     }
   ],
   "expect": {
@@ -416,7 +475,7 @@
     "Kurznachricht (entry hidden)": "[Kurz] kurz(adj) || [nachricht] Nachricht(noun)",
     "Rechenschieber (entry hidden)": "[Rechen] Rechen(noun) || [schieber] Schieber(noun)",
     "Deutschtümelei (entry hidden)": "[Deutsch] deutsch(adj) || [tümelei] Tümelei(noun)",
-    "Fußabstreifer (entry hidden)": "[Fuß] Fuß(noun) || [abstreifer] abstreifen(verb)~",
+    "Fußabstreifer (entry hidden)": "[Fuß] Fuß(noun) || [abstreifer] Abstreifer(noun)<abstreifen+-er~",
     "Schwagerehe (entry hidden)": "[Schwager] Schwager(noun) || [ehe] Ehe(noun)",
     "Gegenoffensive (entry hidden)": "[Gegen] gegen(prep) || [offensive] Offensive(noun)",
     "Korallenotter (entry hidden)": "[Korallen] Koralle(noun) || [otter] Otter(noun)",
@@ -448,7 +507,7 @@
     "börslich": "[börslich] börslich(adj)<Börse+-lich~",
     "gedownloadetes": "[gedownloadetes] downloaden(verb){participle,past}~",
     "Verlinkung": "[Verlinkung] Verlinkung(noun)<verlinken+-ung~",
-    "Absperrungen": "[Absperrungen] Absperrung(noun)<absperren+-ung{plural}~ / Absperrung(noun)<Absperre+-ung{plural}~",
+    "Absperrungen": "[Absperrungen] Absperrung(noun)<absperren+-ung{plural}~",
     "Kostbarkeit (entry hidden)": "[Kostbarkeit] Kostbarkeit(noun)<kostbar+-keit~",
     "Programmierung (entry hidden)": "[Programmierung] Programmierung(noun)<programmieren+-ung~",
     "understand": "null",
@@ -472,6 +531,34 @@
     "Straßenbahn": "[Straßenbahn] Straßenbahn(noun)",
     "Tageslicht": "[Tageslicht] Tageslicht(noun)",
     "Hundeleine": "[Hundeleine] Hundeleine(noun)",
-    "Xyzzy": "null"
+    "Xyzzy": "null",
+    "Forensiker": "[Forensiker] Forensiker(noun)<Forensik+-er~",
+    "Forensikerin": "[Forensikerin] Forensikerin(noun)<Forensik+-erin~",
+    "Aufpasser": "[Aufpasser] Aufpasser(noun)<aufpassen+-er~",
+    "Totschläger (entry hidden)": "[Totschläger] Totschläger(noun)<Totschlag+-er~",
+    "Kolonisten": "[Kolonisten] Kolonist(noun)<Kolonie+-ist~",
+    "Optometrist (entry hidden)": "[Optometrist] Optometrist(noun)<Optometrie+-ist~",
+    "Schmetterling (entry hidden)": "[Schmetterling] Schmetterling(noun)<schmettern+-ling~",
+    "Schwärmerei (entry hidden)": "[Schwärmerei] Schwärmerei(noun)<Schwärmer+-ei~",
+    "Kindlein": "[Kindlein] Kindlein(noun)<diminutive of Kind",
+    "Kindleins": "[Kindleins] Kindlein(noun)<diminutive of Kind{genitive}",
+    "Freundin": "[Freundin] Freundin(noun)<female equivalent of Freund",
+    "Händchen": "[Händchen] Händchen(noun)<diminutive of Hand",
+    "Verwarnung": "[Verwarnung] Verwarnung(noun)<verbal noun of verwarnen",
+    "Fahrlässigkeit (entry hidden)": "[Fahrlässigkeit] Fahrlässigkeit(noun)<fahrlässig+-keit~",
+    "durchschaubar": "[durchschaubar] durchschaubar(adj)<durchschauen+-bar~",
+    "unehrenhaft": "[unehrenhaft] unehrenhaft(adj)<Unehre+-haft~",
+    "Tausender": "[Tausender] Tausender(noun)<Tausend+-er~",
+    "ziemliche": "[ziemliche] ziemlich(adv)~",
+    "stinkende": "[stinkende] stinken(verb){participle,present}~",
+    "versuchter": "[versuchter] versuchen(verb){participle,past}~",
+    "organisiertes": "[organisiertes] organisieren(verb){participle,past}~",
+    "Gesundheitsamt": "[Gesundheits] Gesundheit(noun) || [amt] Amt(noun)",
+    "Spieltisch": "[Spiel] Spiel(noun) || [tisch] Tisch(noun)",
+    "Unehrenhaft": "[Unehren] Unehre(noun) || [haft] Haft(noun)",
+    "Literaturkritiker (entry hidden)": "[Literatur] Literatur(noun) || [kritiker] Kritiker(noun)",
+    "Grundbesitzer (entry hidden)": "[Grund] Grund(noun) || [besitzer] Besitzer(noun)",
+    "Merlin": "null",
+    "Sterling": "null"
   }
 }

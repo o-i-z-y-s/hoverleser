@@ -118,9 +118,9 @@ function summarize(result) {
   return result.segments.map(seg =>
     `[${seg.matchedText}] ` + seg.entries.map(e => {
       const tags = e.gramTags?.length ? `{${e.gramTags.join(',')}}` : '';
-      const word = e.derivation
-        ? `${e.derivation.word}(${e.derivation.p})<${e.w}+-${e.derivation.suffix}`
-        : `${e.w}(${e.p ?? '?'})`;
+      const d = e.derivation;
+      const word = !d ? `${e.w}(${e.p ?? '?'})`
+        : `${d.word}(${d.p})<` + (d.suffix ? `${e.w}+-${d.suffix}` : `${d.relation} of ${e.w}`);
       return `${word}${tags}${e.inferred ? '~' : ''}`;
     }).join(' / ')
   ).join(' || ');

@@ -210,6 +210,9 @@ const RELATION_LABELS = [
 
 // Lexical relations whose base is the verb or adjective a noun was built from.
 const DEVERBAL_LEADS = new Set(['agent', 'gerund', 'verbal', 'nominalization']);
+// Lexical relations that make a word of its own from the base (Kindlein,
+// diminutive of Kind), as opposed to another spelling of the same word.
+const DERIVED_LEADS = new Set([...DEVERBAL_LEADS, 'diminutive', 'augmentative', 'female', 'male']);
 
 /**
  * Parse a gloss of the shape "<relation words> of <base>".
@@ -383,78 +386,137 @@ function arrangeByCase(entries, hint) {
   return entries;
 }
 
-// Derivational suffixes, and the word class they form. All four noun
-// suffixes make feminine nouns.
-const ADJ_SUFFIXES  = ['lich', 'isch', 'haft', 'bar', 'los', 'sam', 'ig'];
-const NOUN_SUFFIXES = ['heit', 'keit', 'schaft', 'ung'];
-// Suffixes that attach to a whole word, so the bare base is the best guess.
-const BARE_BASE_SUFFIXES = new Set(['heit', 'keit', 'schaft']);
-const INFL_ENDS     = ['sten','stem','ster','stes','ste',
-                       'tes','ten','ter','tem','te',
-                       'es','en','er','em','e','st','t',''];
+// ── Derivation and inflection (German) ────────────────────────────────────
+
+// Endings an adjective can take: plain, comparative, and superlative.
+const ADJ_ENDS = ['', 'e', 'en', 'em', 'er', 'es',
+                  'ere', 'eren', 'erem', 'erer', 'eres',
+                  'ste', 'sten', 'stem', 'ster', 'stes'];
+const adjEndTags = end => (end.startsWith('st') ? ['superlative'] : end.length > 2 ? ['comparative'] : []);
+const adjEnds = Object.fromEntries(ADJ_ENDS.map(end => [end, adjEndTags(end)]));
+
+// Ways a base may be spelled in front of a suffix, from the stem left over.
+const asVerb    = s => [s + 'en', s + 'n'];
+const asNoun    = s => [s, s + 'e'];
+const umlautOff = (spell, s) => (deUmlaut(s) ? spell(deUmlaut(s)) : []);
+
+/**
+ * Derivational suffixes. Each forms a word of class `p` (and gender `g`) from
+ * a base of a part of speech in `from`, takes the endings in `ends` (ending →
+ * the tags it proves), and lists the spellings its base may have (`bases`).
+ * `accept` narrows the base further where a suffix is picky: -in makes the
+ * feminine of a masculine noun, and -er makes nouns from verbs freely but
+ * from nouns mostly in -ik (Forensiker) or from longer ones (Tausender), which
+ * keeps English names (Baker, Hunter) out.
+ *
+ * `capital` suffixes are tried only on a word that may be a noun by its
+ * spelling: -er, -in, and -ling also end many English words (water, darling).
+ * Where one suffix ends another, the longer one comes first (-lein before
+ * -in, -ler before -er), except that -in and -ei come before -erin and -erei:
+ * Lehrerin is Lehrer + -in and Bäckerei is Bäcker + -ei when the dictionary
+ * has the noun in -er. The present participle (stinkend: stinken + -d) is
+ * listed as the suffix -d, which follows an infinitive.
+ */
+const DERIVATIONS = [
+  ...['lich', 'haft', 'sam', 'ig'].map(suffix =>
+    ({ suffix, p: 'adj', from: ['noun', 'verb', 'adj'], ends: adjEnds, bases: s => [s + 'en', s + 'e', s, ...umlautOff(asNoun, s)] })),
+  { suffix: 'isch', p: 'adj', from: ['noun'], ends: adjEnds, bases: s => [s + 'e', s, ...umlautOff(asNoun, s)] },
+  { suffix: 'bar', p: 'adj', from: ['verb', 'noun'], ends: adjEnds, bases: s => [s + 'en', s + 'e', s] },
+  { suffix: 'los', p: 'adj', from: ['noun'], ends: adjEnds, bases: s => [s + 'en', s + 'e', s] },
+  { suffix: 'd', p: 'adj', from: ['verb'], ends: adjEnds, tags: ['participle', 'present'], bases: s => (/..(?:e|[lr])n$/.test(s) ? [s] : []) },
+  { suffix: 'heit', p: 'noun', g: 'f', from: ['adj', 'noun'], ends: { '': [], en: ['plural'] }, bases: s => [s, s + 'en', s + 'e'] },
+  { suffix: 'keit', p: 'noun', g: 'f', from: ['adj'], ends: { '': [], en: ['plural'] }, bases: s => [s, s + 'en', s + 'e'] },
+  { suffix: 'schaft', p: 'noun', g: 'f', from: ['noun', 'adj', 'verb'], ends: { '': [], en: ['plural'] }, bases: s => [s, s + 'en', s + 'e'] },
+  { suffix: 'ung', p: 'noun', g: 'f', from: ['verb'], ends: { '': [], en: ['plural'] }, bases: asVerb },
+  { suffix: 'lein', p: 'noun', g: 'n', from: ['noun'], capital: true, ends: { '': [], s: ['genitive'] }, bases: s => [...asNoun(s), ...umlautOff(asNoun, s)] },
+  { suffix: 'chen', p: 'noun', g: 'n', from: ['noun'], capital: true, ends: { '': [], s: ['genitive'] }, bases: s => [...asNoun(s), ...umlautOff(asNoun, s)] },
+  { suffix: 'in', p: 'noun', g: 'f', from: ['noun'], capital: true, ends: { '': [], nen: ['plural'] }, bases: s => [...asNoun(s), ...umlautOff(asNoun, s)],
+    accept: base => base.g === 'm' },
+  { suffix: 'erin', p: 'noun', g: 'f', from: ['verb', 'noun'], capital: true, ends: { '': [], nen: ['plural'] }, bases: s => [...asVerb(s), s, ...umlautOff(asVerb, s), ...umlautOff(asNoun, s)] },
+  { suffix: 'ler', p: 'noun', g: 'm', from: ['noun'], capital: true, ends: { '': [], n: ['plural'], s: ['genitive'] }, bases: s => (s.length >= 4 ? [s, ...umlautOff(asNoun, s)] : []) },
+  { suffix: 'er', p: 'noun', g: 'm', from: ['verb', 'noun'], capital: true, ends: { '': [], n: ['plural'], s: ['genitive'] }, bases: s => [...asVerb(s), s, ...umlautOff(asVerb, s), ...umlautOff(asNoun, s)],
+    accept: base => base.p === 'verb' || base.k.length >= 6 || base.k.endsWith('ik') },
+  { suffix: 'ist', p: 'noun', g: 'm', from: ['noun'], capital: true, ends: { '': [], en: [] }, bases: s => [s + 'ie', s + 'e', s, s + 'o'] },
+  { suffix: 'ei', p: 'noun', g: 'f', from: ['noun'], capital: true, ends: { '': [], en: ['plural'] }, bases: s => (s.endsWith('er') ? [s] : []) },
+  { suffix: 'erei', p: 'noun', g: 'f', from: ['verb'], capital: true, ends: { '': [], en: ['plural'] }, bases: s => [...asVerb(s), ...umlautOff(asVerb, s)] },
+  { suffix: 'ling', p: 'noun', g: 'm', from: ['verb', 'adj'], capital: true, ends: { '': [], e: ['plural'], en: ['plural'], s: ['genitive'] }, bases: s => [...asVerb(s), s, s + 'e'] },
+  { suffix: 'nis', p: 'noun', from: ['verb', 'adj'], capital: true, ends: { '': [], se: ['plural'], sen: ['plural'], ses: ['genitive'] }, bases: s => [...asVerb(s), s] },
+  { suffix: 'tum', p: 'noun', g: 'n', from: ['adj', 'noun', 'verb'], capital: true, ends: { '': [], s: ['genitive'], es: ['genitive'] }, bases: s => [s, s + 'e', s + 'en'] },
+];
 
 /**
  * Stems of a word built with a derivational suffix, alone or followed by an
- * inflectional ending: börsliche = börs + lich + e, Kostbarkeiten = kostbar +
- * keit + en. Each stem carries a `derivation` describing the derived word
- * itself (börslich, an adjective, by -lich), since that is what was hovered.
+ * ending: börsliche = börs + lich + e, Kostbarkeiten = kostbar + keit + en,
+ * Forensikern = Forensik + er + n. Each candidate carries a `derivation`
+ * describing the derived word itself (börslich, an adjective, by -lich),
+ * since that is what was hovered, and `accepts`, which tells whether a block
+ * found for the stem can be its base.
+ *
+ * @param {'lower'|'upper'|'ambiguous'} hint  see caseHint
  */
-function addDerived(w, suffixes, add) {
-  for (const dsuf of suffixes) {
-    const noun = NOUN_SUFFIXES.includes(dsuf);
-    for (const iend of INFL_ENDS) {
-      const combined = dsuf + iend;
-      if (w.endsWith(combined) && w.length - combined.length >= 3) {
-        const base = w.slice(0, -combined.length);
-        const lemma = w.slice(0, w.length - iend.length);
-        const derivation = noun
-          ? { word: lemma[0].toUpperCase() + lemma.slice(1), p: 'noun', g: 'f', suffix: dsuf }
-          : { word: lemma, p: 'adj', suffix: dsuf };
-        // -en after a noun suffix can only be the plural.
-        const tags = noun && iend === 'en' ? ['plural'] : [];
-        if (BARE_BASE_SUFFIXES.has(dsuf)) add(base, tags, derivation);  // kostbar + keit
-        add(base + 'en', tags, derivation);  // verb infinitive (absperren → Absperrung)
-        add(base + 'e', tags, derivation);   // noun root (e.g. Börse)
-        add(base, tags, derivation);
+function derivationStems(word, hint) {
+  const w = word.toLowerCase();
+  const seen = new Set();
+  const out = [];
+  for (const d of DERIVATIONS) {
+    if (d.capital && hint === 'lower') continue;
+    const pos = new Set(d.from);
+    const accepts = base => pos.has(base.p) && (!d.accept || d.accept(base));
+    for (const [end, endTags] of Object.entries(d.ends)) {
+      const tail = d.suffix + end;
+      if (!w.endsWith(tail) || w.length - tail.length < 3) continue;
+      const lemma = w.slice(0, w.length - end.length);
+      const derivation = {
+        word: d.p === 'noun' ? lemma[0].toUpperCase() + lemma.slice(1) : lemma,
+        p: d.p, ...(d.g && { g: d.g }), suffix: d.suffix,
+      };
+      const tags = [...(d.tags ?? []), ...endTags];
+      for (const stem of d.bases(w.slice(0, -tail.length))) {
+        const id = `${d.suffix}\u0000${stem}`;
+        if (stem.length < 3 || stem === w || seen.has(id)) continue;
+        seen.add(id);
+        out.push({ stem, tags, derivation, accepts });
       }
     }
   }
+  return out;
 }
 
+// Parts of speech that take the adjective endings -er and -em.
+const ADJECTIVAL_POS = new Set(['adj', 'pron', 'art', 'det', 'num']);
+
+// Inseparable verb prefixes: their past participles have no ge- (versucht).
+const INSEPARABLE = /^(?:be|emp|ent|er|ge|miss|ver|zer)/;
+
 /**
- * German morphological fallback.
- * When neither the entries nor the forms index know a word, try common
- * inflectional and derivational reductions to find a stem that they do know.
+ * Stems of an inflected word that neither the entries nor the forms index
+ * know, by stripping inflectional endings and the ge- of a participle.
  *
  * Examples (the stem that ends up matching):
  *   gehandeltes   → ge- and -tes stripped, +n      → handeln
- *   börslich      → -lich stripped, +en            → börsen (a form of Börse)
  *   schönsten     → -sten stripped                 → schön
+ *   versuchter    → -ter stripped, +en             → versuchen (participle)
  *
- * With `nounSuffixes`, only noun-forming suffixes are tried instead
- * (Kostbarkeit → kostbar, Absperrung → absperren). lookupWord keeps that for
- * last, because a compound split explains such a word better when one exists.
- *
- * Returns {stem, tags, derivation} candidates in priority order (most
- * specific first), never including the word itself. `tags` holds only what
- * the stripped affixes make certain; see inferFromStems for how they are
- * applied. `derivation` is set for a derivational suffix (see addDerived).
+ * Returns {stem, tags, accepts?} candidates in priority order (most specific
+ * first), never including the word itself. `tags` holds only what the
+ * stripped affixes make certain; see inferFromStems for how they are applied.
+ * A stem reached by an ending nouns do not take (-er, -ter, -st ...) accepts
+ * no noun, and one reached by -er or -em, which no verb form ends in, accepts
+ * no verb either: a match of that kind is a coincidence or a derivation
+ * (Forensiker, Aufpasser), not an inflected form.
  */
-function germanDeinflect(word, nounSuffixes = false) {
+function inflectionStems(word) {
   const w = word.toLowerCase();
   const seenCandidates = new Set([w]);
   const out = [];
-  const add = (stem, tags = [], derivation = null) => {
+  const add = (stem, tags = [], accepts = undefined) => {
     if (stem.length >= 3 && !seenCandidates.has(stem)) {
       seenCandidates.add(stem);
-      out.push({ stem, tags, derivation });
+      out.push({ stem, tags, accepts });
     }
   };
-
-  if (nounSuffixes) {
-    addDerived(w, NOUN_SUFFIXES, add);
-    return out;
-  }
+  const notNoun = block => block.p !== 'noun';
+  const adjectival = block => ADJECTIVAL_POS.has(block.p);
 
   // ── ge- prefix (past participles used as adjectives) ──────────────────────
   if (w.startsWith('ge') && w.length > 5) {
@@ -476,9 +538,6 @@ function germanDeinflect(word, nounSuffixes = false) {
     add(deGe);
   }
 
-  // ── Derivational suffixes, plain and with an inflectional ending ──────────
-  addDerived(w, ADJ_SUFFIXES, add);
-
   // ── Inflectional endings (adjective agreement + verb conjugation) ─────────
   // Order: longer/more-specific suffixes before shorter ones.
   for (const end of [
@@ -489,11 +548,19 @@ function germanDeinflect(word, nounSuffixes = false) {
   ]) {
     if (w.endsWith(end) && w.length - end.length >= 3) {
       const base = w.slice(0, -end.length);
-      const tags = end.startsWith('st') && end.length > 2 ? ['superlative'] : [];
-      add(base + 'en');
-      add(base + 'n');
-      add(base + 'e');
-      add(base, tags);
+      const accepts = end === 'er' || end === 'em' ? adjectival
+                    : ['es', 'en', 'e'].includes(end) ? undefined : notNoun;
+      // -ter, -tes, -tem can only be a participle with an adjective ending;
+      // without ge-, that is a verb with an inseparable prefix or in -ieren.
+      const prefix = INSEPARABLE.exec(w)?.[0] ?? '';
+      const participle = ['ter', 'tes', 'tem'].includes(end) &&
+        ((prefix && base.length - prefix.length >= 3) || base.endsWith('ier'));
+      const tags = participle ? ['participle', 'past']
+                 : end.startsWith('st') && end.length > 2 ? ['superlative'] : [];
+      add(base + 'en', tags, accepts);
+      add(base + 'n', tags, accepts);
+      add(base + 'e', tags, accepts);
+      add(base, tags, accepts);
     }
   }
 
@@ -580,12 +647,14 @@ async function collectCandidate(reader, candidate, hint) {
 
   const resolved = await resolveFormOf(reader, collected);
 
-  // One result per block; an annotated copy beats a plain one.
+  // One result per block; a derived word beats its plain base, and an
+  // annotated copy beats a plain one.
   const best = new Map();
   for (const entry of resolved) {
     const id   = `${entry.k}\u0000${entry.p ?? ''}\u0000${entry._b ?? 0}`;
     const prev = best.get(id);
-    if (!prev || (entry.gramTags?.length && !prev.gramTags?.length)) best.set(id, entry);
+    if (!prev || (entry.derivation && !prev.derivation) ||
+        (!prev.derivation && entry.gramTags?.length && !prev.gramTags?.length)) best.set(id, entry);
   }
   const all = [...best.values()]
     .filter(e => (e.s ?? []).length > 0)
@@ -604,19 +673,21 @@ async function collectCandidate(reader, candidate, hint) {
  * they do not describe the hovered word. Proper names are skipped: names do
  * not inflect or derive this way, so a name reached by stripping is chance.
  * Unresolved stubs are skipped too, since "plural of X" says nothing about X.
+ * A candidate's `accepts`, when present, decides which blocks the stem may
+ * match.
  *
  * An entry reached through a derivational suffix keeps its base's senses and
  * gains `derivation` ({ word, p, g?, suffix }): the popup heads it with the
  * derived word, and its tags describe that word, not the base.
  */
 async function inferFromStems(reader, stems) {
-  for (const { stem, tags, derivation } of stems) {
+  for (const { stem, tags, derivation, accepts = () => true } of stems) {
     const viaStem = (await collectCandidate(reader, stem, 'ambiguous'))
-      .filter(e => e.p !== 'name' && isRealBlock(e));
+      .filter(e => e.p !== 'name' && isRealBlock(e) && accepts(e));
     if (viaStem.length === 0) continue;
     return viaStem.map(e => ({
       ...e,
-      gramTags: derivation ? tags : tags.filter(tag => INFERRED_TAG_POS[tag] === e.p),
+      gramTags: derivation ? tags : inferredTags(e, tags),
       inferred: true,
       ...(derivation && { derivation }),
     }));
@@ -625,13 +696,29 @@ async function inferFromStems(reader, stems) {
 }
 
 /**
- * Look up one lowercase candidate, falling back to germanDeinflect when
- * nothing is recorded for it and `deinflect` is set.
+ * Tags for a block reached by stripping inflectional endings: those the
+ * endings prove that fit its part of speech, plus participle tags when the
+ * stem itself is a recorded participle (stinkend in stinkende), since an
+ * adjective ending does not change that.
  */
-async function lookupCandidate(reader, candidate, { hint = 'ambiguous', deinflect = false } = {}) {
+function inferredTags(block, tags) {
+  const own = block.gramTags ?? [];
+  const participle = own.includes('participle') ? own.filter(tag => PARTICIPLE_TAGS.has(tag)) : [];
+  return [...new Set([...participle, ...tags.filter(tag => INFERRED_TAG_POS[tag] === block.p)])];
+}
+const PARTICIPLE_TAGS = new Set(['participle', 'present', 'past']);
+
+/**
+ * Look up one lowercase candidate. When nothing is recorded for it, fall back
+ * to inflectionStems if `deinflect` is set, and then to derivationStems if
+ * `derive` is set too.
+ */
+async function lookupCandidate(reader, candidate, { hint = 'ambiguous', deinflect = false, derive = false } = {}) {
   const found = await collectCandidate(reader, candidate, hint);
   if (found.length > 0 || !deinflect) return found;
-  return inferFromStems(reader, germanDeinflect(candidate));
+  const inflected = await inferFromStems(reader, inflectionStems(candidate));
+  if (inflected.length > 0 || !derive) return inflected;
+  return inferFromStems(reader, derivationStems(candidate, hint));
 }
 
 // Lead words of an inflection gloss that are badged under another name.
@@ -686,8 +773,14 @@ async function findBase(reader, stub, { base, lead }) {
  * Replace stub blocks ("plural of Wörterbuch") with the block they point at,
  * annotated with the stub's grammatical role as gramTags.
  *
+ * A stub for a word derived from its base (Kindlein: "diminutive of Kind")
+ * stands for a word of its own, so the result also gets `derivation`
+ * ({ word, p, g?, relation }), and the popup heads it with the stub's word.
+ *
  * A stub that arrived through the forms index keeps the tags it arrived with.
- * A stub whose base is already among `entries` adds nothing and is dropped.
+ * A stub whose base is already among `entries` adds nothing and is dropped,
+ * unless it is a derived word of its own; collectCandidate then keeps the
+ * derived reading in place of the plain base.
  * A stub whose base cannot be found is kept as it is: "plural of X" is still
  * worth showing when X has no entry.
  */
@@ -698,14 +791,24 @@ async function resolveFormOf(reader, entries) {
     const parsed = (entry.s ?? []).map(parseSenseFormOf);
     if (parsed.length === 0 || parsed.some(p => p === null)) { out.push(entry); continue; }
 
+    const { kind, lead } = parsed[0];
+    const derived = kind === 'lexical' && lead.some(word => DERIVED_LEADS.has(word));
     const key = baseKey(parsed[0].base);
-    if (entries.some(e => e !== entry && e.k === key && !isFormOfBlock(e))) continue;
+    if (!derived && entries.some(e => e !== entry && e.k === key && !isFormOfBlock(e))) continue;
 
     const base = await findBase(reader, entry, parsed[0]);
     if (!base) { out.push(entry); continue; }
     // findBase can follow the forms index back to a block that is in hand.
-    if (entries.some(e => e.k === base.k && e._b === base._b && !isFormOfBlock(e))) continue;
-    out.push({ ...base, gramTags: entry.gramTags ?? stubTags(entry, parsed) });
+    if (!derived && entries.some(e => e.k === base.k && e._b === base._b && !isFormOfBlock(e))) continue;
+    const tags = entry.gramTags ?? stubTags(entry, parsed);
+    if (derived) {
+      const relation = lead.join(' ');
+      const label = RELATION_LABELS.find(([word]) => lead.includes(word))?.[1];
+      const derivation = { word: entry.w, p: entry.p, ...(entry.g && { g: entry.g }), relation };
+      out.push({ ...base, gramTags: tags.filter(tag => tag !== label), derivation });
+    } else {
+      out.push({ ...base, gramTags: tags });
+    }
   }
   return out;
 }
@@ -723,8 +826,9 @@ const PARTICLES = new Set(['auf', 'aus', 'bei', 'ein', 'her', 'hin', 'los', 'mit
 // Shortest tail that may be a bare verb form or a proper name instead of a
 // recorded noun or adjective, and shortest tail after a three-letter prefix.
 const MIN_INFERRED_HEAD = 5;
-// Shortest tail that may be matched through germanDeinflect, which strips up
-// to four letters and so needs more of the word left over to mean anything.
+// Shortest tail that may be matched through inflectionStems or
+// derivationStems, which strip up to six letters and so need more of the word
+// left over to mean anything.
 const MIN_DEINFLECTED_HEAD = 6;
 
 // Linking elements (Fugenelemente) between the parts of a compound, longest
@@ -736,6 +840,10 @@ const MIN_DEINFLECTED_HEAD = 6;
 const LINKERS = ['ens', 'es', 'er', 'en', 'n', 'e', 's'];
 // Noun endings that always take -s- before the next part of a compound.
 const REGULAR_S_STEM = /(?:ung|heit|keit|schaft|ion|tät|ling|tum)$/;
+// Those of them that are never the end of a shorter word (Schwung, Million,
+// and Eigentum can end a word in -ung, -ion, and -tum), so a first part in
+// one of them without its -s- is no first part at all (Gesundheit + Samt).
+const MUST_LINK = /(?:heit|keit|schaft|tät)$/;
 // Linking elements that are plural endings and can umlaut the stem
 // (Bücher+regal, Gänse+braten), plus none at all (Mütter+beratung).
 const UMLAUT_LINKERS = ['er', 'e', ''];
@@ -870,7 +978,8 @@ async function guessLinked(reader, prefix) {
  * therefore overrides a verb, adjective, or name spelled the same, but not a
  * preposition or adverb: "gegen" stays gegen.
  *
- * With `exactOnly`, guessLinked is not tried.
+ * With `exactOnly`, guessLinked is not tried; only the regular -s- after
+ * -ung, -heit, and the like is (Gesundheits+amt, not Gesundheit + Samt).
  *
  * @returns {Promise<{entries: object[], guessed: boolean}|null>}
  */
@@ -884,6 +993,11 @@ async function findPrefix(reader, prefix, exactOnly) {
     if (attested) return recorded([attested]);
   }
   if (direct.length > 0) return recorded(direct);
+  // -s- after -ung, -heit, and the like is a rule, so it counts as recorded.
+  if (prefix.endsWith('s') && REGULAR_S_STEM.test(prefix.slice(0, -1))) {
+    const noun = await realNoun(reader, prefix.slice(0, -1));
+    if (noun) return recorded([noun]);
+  }
   if (exactOnly) return null;
   const linked = await guessLinked(reader, prefix);
   return linked && { entries: linked.blocks.map(strip), guessed: linked.guessed };
@@ -917,9 +1031,8 @@ async function resolveTail(reader, tailWord, exactOnly) {
   }
   if (short) return null;
 
-  const found = await lookupCandidate(reader, tail, {
-    deinflect: !exactOnly && tail.length >= MIN_DEINFLECTED_HEAD,
-  });
+  const guess = !exactOnly && tail.length >= MIN_DEINFLECTED_HEAD;
+  const found = await lookupCandidate(reader, tail, { deinflect: guess, derive: guess });
   const heads = found.filter(e =>
     posOf(e) === 'noun' || posOf(e) === 'adj' ||
     (posOf(e) === 'verb' && (long || !e.gramTags?.length || e.gramTags.includes('participle')))
@@ -982,7 +1095,7 @@ async function splitAfterShortPrefix(reader, prefix, tailWord, exactOnly) {
  * and a guess beats a chain of accidental short words (Fuß + Abstreifer, not
  * Fuß + ABS + "treifer").
  *
- * @returns {Promise<Array<{matchedText: string, entries: object[]}>|null>}
+ * @returns {Promise<Array<{matchedText: string, entries: object[], guessed?: boolean}>|null>}
  */
 async function splitCompound(reader, word) {
   const exact = await splitCompoundMemo(reader, word, true);
@@ -990,7 +1103,7 @@ async function splitCompound(reader, word) {
   const best = exact && splitCost(exact) <= 2.1
     ? exact
     : cheaper(exact, await splitCompoundMemo(reader, word, false));
-  return best && best.map(({ guessed, ...segment }) => segment);
+  return best;
 }
 
 const cheaper = (a, b) => (!a || !b ? a ?? b : splitCost(b) < splitCost(a) ? b : a);
@@ -1033,6 +1146,7 @@ async function splitCompoundPass(reader, word, exactOnly) {
       if (!segments) continue;
       segments = [{ ...segments[0], matchedText: word.slice(0, len) }, ...segments.slice(1)];
     } else {
+      if (MUST_LINK.test(lower.slice(0, len))) continue;
       const prefix = await findPrefix(reader, lower.slice(0, len), exactOnly);
       if (!prefix) continue;
       // A guessed linking element in front of a three-letter tail is two
@@ -1049,17 +1163,28 @@ async function splitCompoundPass(reader, word, exactOnly) {
   return best;
 }
 
+/** Whether an analysis's head reading agrees with the word's capitalization. */
+function nounByCase(segments, hint) {
+  if (hint === 'ambiguous') return true;
+  const noun = segments[segments.length - 1].entries.some(e => posOf(e) === 'noun');
+  return noun === (hint === 'upper');
+}
+
 /**
  * Look up a word in the DB.
  *
  * Priority order (always biased toward the full word):
  *
  *   1. The word itself: its entry, plus lemmas it is an inflected form of.
- *   2. German only: a stem reached by germanDeinflect.
- *   3. German only: a compound split (see splitCompound). Other languages do
- *      not share the closed-compound convention or its linking elements.
- *   4. German only: the base of a noun-forming suffix (-heit, -keit, -schaft,
- *      -ung).
+ *   2. German only: a stem reached by inflectionStems.
+ *   3. German only: the cheaper of a compound split (see splitCompound) and a
+ *      derivation of the whole word (see derivationStems), scored alike by
+ *      splitCost. Where one analysis is a noun and the other is not, the
+ *      word's capitalization decides (Unehrenhaft is Unehre + Haft, but
+ *      unehrenhaft is an adjective in -haft); otherwise a split into recorded
+ *      words wins a tie (Spieltisch is Spiel + Tisch, not an adjective in
+ *      -isch). Other languages do not share the closed-compound convention or
+ *      its linking elements.
  *
  * Returns null if nothing is found, or { segments: [{ matchedText, entries }] }
  * with one segment per compound part. `matchedText` is the slice of the
@@ -1079,11 +1204,13 @@ async function lookupWord(db, word, langCode = 'de', sentenceInitial = false) {
   }
   if (!german) return null;
 
-  const segments = await splitCompound(reader, word);
-  if (segments) return { segments };
-
-  const derived = await inferFromStems(reader, germanDeinflect(word, true));
-  return derived.length > 0 ? { segments: [{ matchedText: word, entries: derived }] } : null;
+  const derived = await inferFromStems(reader, derivationStems(word, hint));
+  const whole = derived.length > 0 ? [{ matchedText: word, entries: derived }] : null;
+  const split = await splitCompound(reader, word);
+  const best = !split || !whole ? split ?? whole
+             : nounByCase(split, hint) !== nounByCase(whole, hint) ? (nounByCase(split, hint) ? split : whole)
+             : splitCost(split) <= splitCost(whole) ? split : whole;
+  return best && { segments: best.map(({ guessed, ...segment }) => segment) };
 }
 
 // ── Metadata helpers ───────────────────────────────────────────────────────

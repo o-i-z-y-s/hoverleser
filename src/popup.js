@@ -63,12 +63,6 @@ async function init() {
 async function saveSettings() {
   settings.langCode = LANG_CODE; // always German
   await browser.runtime.sendMessage({ type: 'set-settings', settings });
-  // Broadcast to every tab so all content scripts update immediately,
-  // not just the currently active one.
-  const tabs = await browser.tabs.query({});
-  for (const tab of tabs) {
-    browser.tabs.sendMessage(tab.id, { type: 'settings-changed', settings }).catch(() => {});
-  }
 }
 
 // ── DB status ─────────────────────────────────────────────────────────────
@@ -421,6 +415,12 @@ function buildSrTagRow(entry, shownSenses) {
   return row;
 }
 
+/** "from Börse + -lich", or "diminutive of Kind"; see derivationText in content.js. */
+function srDerivationText(entry) {
+  const { suffix, relation } = entry.derivation;
+  return suffix ? `from ${entry.w} + -${suffix}` : `${relation} of ${entry.w}`;
+}
+
 function renderSrEntries(entries) {
   const frag = document.createDocumentFragment();
   const maxTotal = settings.maxSenses ?? 3;
@@ -449,7 +449,7 @@ function renderSrEntries(entries) {
       const tagRow = buildSrTagRow(entry, derived ? [] : senses);
       if (tagRow) frag.append(tagRow);
     }
-    if (derived) frag.append(srEl('div', 'sr-derivation', `from ${entry.w} + -${derived.suffix}`));
+    if (derived) frag.append(srEl('div', 'sr-derivation', srDerivationText(entry)));
     else if (settings.showIpa && entry.i) frag.append(srEl('div', 'sr-ipa', entry.i));
     if (senses.length) {
       const sensesBox = srEl('div', 'sr-senses');

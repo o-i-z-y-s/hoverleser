@@ -391,7 +391,7 @@ jobs:
           cp background.js content.js popup.html popup.js dist/.chrome-stage/
           cp icons/icon16.png icons/icon32.png icons/icon48.png \
              icons/icon96.png icons/icon128.png dist/.chrome-stage/icons/
-          cp lib/browser-polyfill.min.js dist/.chrome-stage/lib/
+          cp lib/browser-polyfill.min.js lib/theme.js dist/.chrome-stage/lib/.
           cd dist/.chrome-stage
           zip -r "../hoverleser-${VERSION}-chrome.zip" .
           cd ../..

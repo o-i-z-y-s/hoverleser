@@ -17,9 +17,15 @@ docs/
 .vscode/
 *.swp
 
-# Build artifacts (dictionary JSONL/gz, logs, temp files)
-# src/lib/ is intentionally committed (vendored polyfill)
+# Node
+node_modules/
+npm-debug.log
+
+# Built dictionaries and extension packages (src/lib/ is committed: vendored polyfill)
 src/dist/
+
+# Copied from manifest.firefox.json or manifest.chrome.json to load the extension
+src/manifest.json
 
 # Test run log, written by npm test
 tests/last-run.log

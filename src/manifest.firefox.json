@@ -19,6 +19,7 @@
         "<all_urls>"
       ],
       "js": [
+        "lib/theme.js",
         "content.js"
       ],
       "run_at": "document_idle",
