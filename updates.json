@@ -16,6 +16,11 @@
           "version": "1.2.0",
           "update_link": "https://github.com/o-i-z-y-s/hoverleser/releases/download/v1.2.0/hoverleser-1.2.0-firefox.xpi",
           "update_hash": "sha256:2167044e95c1ee3b1169c266c3b25241dfad6aeb4b60a5ff41a98fe57c5bad79"
+        },
+        {
+          "version": "1.2.1",
+          "update_link": "https://github.com/o-i-z-y-s/hoverleser/releases/download/v1.2.1/hoverleser-1.2.1-firefox.xpi",
+          "update_hash": "sha256:4fdb54943692f58f7030e545299e6cb52924a9030f5d6590e17623249e0ba6e4"
         }
       ]
     }
