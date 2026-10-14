@@ -9,7 +9,10 @@
  */
 'use strict';
 
-globalThis.hoverleserTheme = (() => {
+// A top-level var: content scripts listed together in a manifest share their
+// global declarations, while a property set on globalThis is not visible to
+// the next script in Firefox's content-script sandbox.
+var hoverleserTheme = (() => {
   const colors = {
     // Neutrals, darkest first
     'gray-0': '#141414',
